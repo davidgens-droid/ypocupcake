@@ -15,7 +15,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select"
 import {
   FEELING_SUGGESTIONS,
@@ -621,7 +620,16 @@ export function StepTopic({ value, onChange, formats }: TopicProps) {
               }
             >
               <SelectTrigger className="w-full">
-                <SelectValue />
+                <span data-slot="select-value">
+                  {(() => {
+                    const f = filtered.find(
+                      (x) => x.code === value.exploration_format
+                    )
+                    return f
+                      ? `${f.display_name} · ${f.default_minutes}m`
+                      : "Pick a format"
+                  })()}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {filtered.map((f) => (
