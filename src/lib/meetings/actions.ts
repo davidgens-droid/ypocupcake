@@ -76,6 +76,14 @@ export async function startRound(input: z.infer<typeof startRoundSchema>) {
   }
 
   const order = shuffle(memberIds)
+  const now = new Date().toISOString()
+
+  const perMemberSeconds =
+    parsed.roundType === "lightning"
+      ? 60
+      : parsed.roundType === "commitments"
+        ? 60
+        : 300 // 5 min default for updates / experience-sharing
 
   const { data, error } = await supabase
     .from("meeting_rounds")
@@ -84,7 +92,9 @@ export async function startRound(input: z.infer<typeof startRoundSchema>) {
       round_type: parsed.roundType,
       order_member_ids: order,
       current_index: 0,
-      started_at: new Date().toISOString(),
+      started_at: now,
+      current_started_at: order.length > 0 ? now : null,
+      per_member_seconds: perMemberSeconds,
     })
     .select("id")
     .single()
@@ -107,17 +117,36 @@ export async function advanceRound(roundId: string) {
 
   const nextIndex = (round.current_index ?? 0) + 1
   const finished = nextIndex >= (round.order_member_ids?.length ?? 0)
+  const now = new Date().toISOString()
 
   const { error } = await supabase
     .from("meeting_rounds")
     .update({
       current_index: nextIndex,
-      ended_at: finished ? new Date().toISOString() : null,
+      current_started_at: finished ? null : now,
+      ended_at: finished ? now : null,
     })
     .eq("id", roundId)
   if (error) throw new Error(error.message)
 
   revalidatePath(`/meeting/${round.meeting_id}`)
+  revalidatePath(`/meeting/${round.meeting_id}/run`)
+}
+
+export async function adjustTimer(roundId: string, deltaSeconds: number) {
+  const { supabase } = await ensureMod()
+  const { data: round } = await supabase
+    .from("meeting_rounds")
+    .select("meeting_id, per_member_seconds")
+    .eq("id", roundId)
+    .single()
+  if (!round) return
+  const next = Math.max(15, (round.per_member_seconds ?? 300) + deltaSeconds)
+  const { error } = await supabase
+    .from("meeting_rounds")
+    .update({ per_member_seconds: next })
+    .eq("id", roundId)
+  if (error) throw new Error(error.message)
   revalidatePath(`/meeting/${round.meeting_id}/run`)
 }
 

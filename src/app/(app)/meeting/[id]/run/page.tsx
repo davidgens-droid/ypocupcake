@@ -43,7 +43,9 @@ export default async function RunMeetingPage({
       supabase.from("members").select("id, name"),
       supabase
         .from("meeting_rounds")
-        .select("id, round_type, order_member_ids, current_index, started_at, ended_at")
+        .select(
+          "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds"
+        )
         .eq("meeting_id", id)
         .order("started_at", { ascending: false }),
     ])

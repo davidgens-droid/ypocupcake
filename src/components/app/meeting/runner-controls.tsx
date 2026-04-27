@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { RoundTimer } from "@/components/app/meeting/round-timer"
 import {
   advanceRound,
+  adjustTimer,
   closeMeeting,
   startMeeting,
   startRound,
 } from "@/lib/meetings/actions"
+import { useMeetingRealtime } from "@/lib/meetings/use-meeting-realtime"
 
 type Props = {
   meetingId: string
@@ -21,6 +24,8 @@ type Props = {
     order_member_ids: string[]
     current_index: number
     ended_at: string | null
+    current_started_at: string | null
+    per_member_seconds: number
   } | null
   memberName: Record<string, string>
 }
@@ -33,6 +38,7 @@ export function RunnerControls({
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
+  useMeetingRealtime(meetingId)
 
   function run<T>(work: () => Promise<T>) {
     startTransition(async () => {
@@ -133,14 +139,45 @@ export function RunnerControls({
           {done ? (
             <p className="font-heading text-xl">Round complete.</p>
           ) : (
-            <>
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                Up now
-              </p>
-              <p className="font-heading text-3xl font-semibold">{upNow}</p>
-            </>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Up now
+                </p>
+                <p className="font-heading text-3xl font-semibold">{upNow}</p>
+              </div>
+              <RoundTimer
+                startedAt={activeRound.current_started_at}
+                perMemberSeconds={activeRound.per_member_seconds}
+                size="lg"
+              />
+            </div>
           )}
         </div>
+
+        {!done && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => run(() => adjustTimer(activeRound.id, -30))}
+            >
+              −30s
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => run(() => adjustTimer(activeRound.id, 30))}
+            >
+              +30s
+            </Button>
+            <span className="ml-2 text-xs text-muted-foreground">
+              per-member: {activeRound.per_member_seconds}s
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">
