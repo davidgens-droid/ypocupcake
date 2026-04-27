@@ -28,6 +28,7 @@ import {
   StepTopic,
   StepReview,
 } from "./steps"
+import { BrainDumpDialog } from "./brain-dump-dialog"
 
 const TOTAL_STEPS = 16
 
@@ -254,6 +255,15 @@ export function UpdateBuilder({
           />
         )}
       </div>
+
+      {/* AI brain-dump (floating) */}
+      <BrainDumpDialog
+        onContentReady={(c) => {
+          setContent(c)
+          // Jump to review step so the user can scrub through.
+          setStep(TOTAL_STEPS)
+        }}
+      />
 
       {/* Bottom nav */}
       <div className="sticky bottom-16 flex items-center justify-between border-t bg-background py-3 md:bottom-0">
