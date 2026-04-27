@@ -33,6 +33,7 @@ type Props = {
   members?: Member[] // present when caller is a Czar
   isCzar: boolean
   defaultSubmitterId?: string
+  defaultTopic?: string
 }
 
 export function NewItemForm({
@@ -40,12 +41,13 @@ export function NewItemForm({
   members,
   isCzar,
   defaultSubmitterId,
+  defaultTopic = "",
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
 
   const [submitterId, setSubmitterId] = useState(defaultSubmitterId ?? "")
-  const [topic, setTopic] = useState("")
+  const [topic, setTopic] = useState(defaultTopic)
   const [context, setContext] = useState("")
   const [urgency, setUrgency] = useState<"low" | "med" | "high">("med")
   const [category, setCategory] = useState<"EQ" | "IQ">("EQ")

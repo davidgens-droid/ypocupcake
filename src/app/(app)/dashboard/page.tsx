@@ -9,9 +9,12 @@ import {
   PlusCircle,
 } from "lucide-react"
 
+import { Suspense } from "react"
+
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { PatternCards } from "@/components/app/dashboard/pattern-cards"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
@@ -153,6 +156,11 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* AI pattern cards (renders nothing until member has 3+ updates) */}
+      <Suspense fallback={null}>
+        <PatternCards />
+      </Suspense>
 
       {/* Open commitments */}
       <section className="space-y-2">

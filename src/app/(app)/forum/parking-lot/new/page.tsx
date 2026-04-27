@@ -7,9 +7,16 @@ import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
-export default async function NewParkingLotItemPage() {
+type SearchParams = Promise<{ topic?: string }>
+
+export default async function NewParkingLotItemPage({
+  searchParams,
+}: {
+  searchParams: SearchParams
+}) {
   const me = await requireCurrentMember()
   const supabase = await createClient()
+  const { topic: prefilledTopic } = await searchParams
 
   const [{ data: formatsRaw }, { data: rolesRaw }, { data: membersRaw }] =
     await Promise.all([
@@ -53,6 +60,7 @@ export default async function NewParkingLotItemPage() {
           members={isCzar ? members : undefined}
           isCzar={isCzar}
           defaultSubmitterId={isCzar ? me.id : undefined}
+          defaultTopic={prefilledTopic ?? ""}
         />
       </div>
     </div>
