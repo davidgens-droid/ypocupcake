@@ -56,6 +56,15 @@ export default async function DashboardPage() {
       .eq("year", today.getFullYear()),
   ])
 
+  const { data: existingUpdate } = nextMeeting
+    ? await supabase
+        .from("updates")
+        .select("ready, completed_at")
+        .eq("member_id", me.id)
+        .eq("meeting_id", nextMeeting.id)
+        .maybeSingle()
+    : { data: null }
+
   const isModerator = (roles ?? []).some((r) =>
     ["moderator", "assistant_moderator"].includes(r.role_type)
   )
@@ -120,9 +129,15 @@ export default async function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            {nextMeeting
-              ? "Your update is not started"
-              : "When a meeting is scheduled, your update will live here"}
+            {!nextMeeting
+              ? "When a meeting is scheduled, your update will live here"
+              : !existingUpdate
+                ? "Your update is not started"
+                : existingUpdate.ready
+                  ? "Your update is ready"
+                  : existingUpdate.completed_at
+                    ? "Your update is finalized"
+                    : "Your update is in progress"}
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -132,18 +147,21 @@ export default async function DashboardPage() {
             disabled={!nextMeeting}
             render={<Link href="/me/update" />}
           >
-            Start your update <ArrowRight className="size-4" />
+            {existingUpdate ? "Open my update" : "Start your update"}{" "}
+            <ArrowRight className="size-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-fit gap-2"
-            disabled={!nextMeeting}
-            render={<Link href="/me/update?ai=brain-dump" />}
-          >
-            <Sparkles className="size-4" />
-            Brain-dump with AI
-          </Button>
+          {!existingUpdate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-fit gap-2"
+              disabled={!nextMeeting}
+              render={<Link href="/me/update?ai=brain-dump" />}
+            >
+              <Sparkles className="size-4" />
+              Brain-dump with AI
+            </Button>
+          )}
           {nextMeeting?.status === "upcoming" && (isModerator || me.is_admin) && (
             <Button
               variant="outline"
