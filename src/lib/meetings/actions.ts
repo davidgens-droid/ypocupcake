@@ -5,6 +5,11 @@ import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
+import {
+  getCurrentPhase,
+  getPhases,
+} from "@/lib/meetings/exploration-phases"
+import type { ExplorationFormatCode } from "@/lib/types/domain"
 
 async function ensureMod() {
   const me = await requireCurrentMember()
@@ -165,6 +170,206 @@ export async function endRound(roundId: string) {
     revalidatePath(`/meeting/${round.meeting_id}`)
     revalidatePath(`/meeting/${round.meeting_id}/run`)
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Format-aware Exploration
+// ──────────────────────────────────────────────────────────────────────────
+export async function startExploration(input: {
+  meetingId: string
+  parkingLotItemId: string
+}) {
+  const { supabase } = await ensureMod()
+
+  const { data: item, error: itemErr } = await supabase
+    .from("parking_lot_items")
+    .select("id, submitter_member_id, exploration_format, topic")
+    .eq("id", input.parkingLotItemId)
+    .single()
+  if (itemErr || !item) throw new Error("Parking lot item not found.")
+
+  const format = item.exploration_format as ExplorationFormatCode
+  const phases = getPhases(format)
+  if (phases.length === 0) {
+    throw new Error(`Unknown exploration format: ${format}`)
+  }
+
+  // Pull attending members
+  const { data: attendees } = await supabase
+    .from("attendees")
+    .select("member_id, attending")
+    .eq("meeting_id", input.meetingId)
+  let memberIds = (attendees ?? [])
+    .filter((a) => a.attending)
+    .map((a) => a.member_id)
+  if (memberIds.length === 0) {
+    const { data: all } = await supabase.from("members").select("id")
+    memberIds = (all ?? []).map((m) => m.id)
+  }
+
+  const phase0 = phases[0]
+  const phase0Order = computeRoundOrder(
+    memberIds,
+    item.submitter_member_id,
+    phase0.has_round,
+    phase0.excludes_presenter ?? false
+  )
+  const now = new Date().toISOString()
+
+  // Mark the parking lot item as scheduled (it's running now).
+  await supabase
+    .from("parking_lot_items")
+    .update({ status: "scheduled", scheduled_meeting_id: input.meetingId })
+    .eq("id", input.parkingLotItemId)
+
+  const { data: round, error } = await supabase
+    .from("meeting_rounds")
+    .insert({
+      meeting_id: input.meetingId,
+      round_type: "exploration",
+      exploration_format: format,
+      parking_lot_item_id: item.id,
+      phase_index: 0,
+      phase_started_at: now,
+      order_member_ids: phase0Order,
+      current_index: 0,
+      current_started_at: phase0.has_round ? now : null,
+      per_member_seconds: phase0.default_seconds,
+      started_at: now,
+    })
+    .select("id")
+    .single()
+  if (error) throw new Error(error.message)
+
+  revalidatePath(`/meeting/${input.meetingId}/run`)
+  revalidatePath(`/meeting/${input.meetingId}`)
+  return { roundId: round.id as string }
+}
+
+export async function advanceExploration(roundId: string) {
+  const { supabase } = await ensureMod()
+
+  const { data: round, error: fetchErr } = await supabase
+    .from("meeting_rounds")
+    .select(
+      "id, meeting_id, exploration_format, parking_lot_item_id, phase_index, current_index, order_member_ids"
+    )
+    .eq("id", roundId)
+    .single()
+  if (fetchErr || !round) throw new Error("Round not found.")
+
+  const format = round.exploration_format as ExplorationFormatCode | null
+  const currentPhase = getCurrentPhase(format, round.phase_index ?? 0)
+  if (!currentPhase) {
+    // No phase data; just end the round.
+    return endRoundFinal(round.meeting_id, roundId, round.parking_lot_item_id)
+  }
+
+  const now = new Date().toISOString()
+
+  // If the current phase has a round and there are more members to reveal,
+  // just advance current_index.
+  if (currentPhase.has_round) {
+    const total = round.order_member_ids?.length ?? 0
+    const next = (round.current_index ?? 0) + 1
+    if (next < total) {
+      const { error } = await supabase
+        .from("meeting_rounds")
+        .update({ current_index: next, current_started_at: now })
+        .eq("id", roundId)
+      if (error) throw new Error(error.message)
+      revalidatePath(`/meeting/${round.meeting_id}/run`)
+      revalidatePath(`/meeting/${round.meeting_id}`)
+      return
+    }
+  }
+
+  // Otherwise, advance to the next phase (or end the round).
+  const nextPhaseIndex = (round.phase_index ?? 0) + 1
+  const phases = getPhases(format)
+  if (nextPhaseIndex >= phases.length) {
+    return endRoundFinal(round.meeting_id, roundId, round.parking_lot_item_id)
+  }
+
+  const nextPhase = phases[nextPhaseIndex]
+  // Build the next phase's order if it has a round.
+  let nextOrder: string[] = []
+  let nextCurrentStartedAt: string | null = null
+  if (nextPhase.has_round) {
+    const { data: item } = await supabase
+      .from("parking_lot_items")
+      .select("submitter_member_id")
+      .eq("id", round.parking_lot_item_id ?? "")
+      .maybeSingle()
+    const { data: attendees } = await supabase
+      .from("attendees")
+      .select("member_id, attending")
+      .eq("meeting_id", round.meeting_id)
+    let memberIds = (attendees ?? [])
+      .filter((a) => a.attending)
+      .map((a) => a.member_id)
+    if (memberIds.length === 0) {
+      const { data: all } = await supabase.from("members").select("id")
+      memberIds = (all ?? []).map((m) => m.id)
+    }
+    nextOrder = computeRoundOrder(
+      memberIds,
+      item?.submitter_member_id ?? null,
+      true,
+      nextPhase.excludes_presenter ?? false
+    )
+    nextCurrentStartedAt = now
+  }
+
+  const { error: updErr } = await supabase
+    .from("meeting_rounds")
+    .update({
+      phase_index: nextPhaseIndex,
+      phase_started_at: now,
+      order_member_ids: nextOrder,
+      current_index: 0,
+      current_started_at: nextCurrentStartedAt,
+      per_member_seconds: nextPhase.default_seconds,
+    })
+    .eq("id", roundId)
+  if (updErr) throw new Error(updErr.message)
+  revalidatePath(`/meeting/${round.meeting_id}/run`)
+  revalidatePath(`/meeting/${round.meeting_id}`)
+}
+
+async function endRoundFinal(
+  meetingId: string,
+  roundId: string,
+  parkingLotItemId: string | null
+) {
+  const supabase = await createClient()
+  const now = new Date().toISOString()
+  await supabase
+    .from("meeting_rounds")
+    .update({ ended_at: now, current_started_at: null })
+    .eq("id", roundId)
+  if (parkingLotItemId) {
+    await supabase
+      .from("parking_lot_items")
+      .update({ status: "presented", presented_at: now })
+      .eq("id", parkingLotItemId)
+  }
+  revalidatePath(`/meeting/${meetingId}/run`)
+  revalidatePath(`/meeting/${meetingId}`)
+}
+
+function computeRoundOrder(
+  memberIds: string[],
+  presenterId: string | null,
+  hasRound: boolean,
+  excludesPresenter: boolean
+): string[] {
+  if (!hasRound) return []
+  const pool =
+    excludesPresenter && presenterId
+      ? memberIds.filter((id) => id !== presenterId)
+      : memberIds
+  return shuffle(pool)
 }
 
 export async function closeMeeting(meetingId: string) {

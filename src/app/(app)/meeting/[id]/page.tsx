@@ -24,7 +24,7 @@ export default async function MeetingPage({ params }: { params: Params }) {
     supabase
       .from("meeting_rounds")
       .select(
-        "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds"
+        "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
       )
       .eq("meeting_id", id)
       .order("started_at", { ascending: false }),

@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { RunnerControls } from "@/components/app/meeting/runner-controls"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
+import type { ExplorationFormatCode } from "@/lib/types/domain"
 
 type Params = Promise<{ id: string }>
 
@@ -33,7 +34,7 @@ export default async function RunMeetingPage({
     redirect(`/meeting/${id}`)
   }
 
-  const [{ data: meeting }, { data: members }, { data: rounds }] =
+  const [{ data: meeting }, { data: members }, { data: rounds }, { data: parking }, { data: formats }] =
     await Promise.all([
       supabase
         .from("meetings")
@@ -44,10 +45,18 @@ export default async function RunMeetingPage({
       supabase
         .from("meeting_rounds")
         .select(
-          "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds"
+          "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
         )
         .eq("meeting_id", id)
         .order("started_at", { ascending: false }),
+      supabase
+        .from("parking_lot_items")
+        .select("id, topic, exploration_format, status, scheduled_meeting_id")
+        .in("status", ["parked", "scheduled"])
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("exploration_formats")
+        .select("code, display_name, default_minutes"),
     ])
 
   if (!meeting) notFound()
@@ -56,8 +65,20 @@ export default async function RunMeetingPage({
     (members ?? []).map((m) => [m.id, m.name])
   )
 
-  const activeRound =
-    (rounds ?? []).find((r) => !r.ended_at) ?? null
+  const activeRound = (rounds ?? []).find((r) => !r.ended_at) ?? null
+
+  const formatLabel = new Map(
+    (formats ?? []).map((f) => [
+      f.code,
+      `${f.display_name} · ${f.default_minutes}m`,
+    ])
+  )
+  const parkingLotChoices = (parking ?? []).map((p) => ({
+    id: p.id,
+    topic: p.topic,
+    exploration_format: p.exploration_format as ExplorationFormatCode,
+    format_label: formatLabel.get(p.exploration_format) ?? p.exploration_format,
+  }))
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -86,13 +107,18 @@ export default async function RunMeetingPage({
             status={meeting.status}
             activeRound={activeRound}
             memberName={memberName}
+            parkingLotChoices={parkingLotChoices}
           />
         </CardContent>
       </Card>
 
       {activeRound && (
         <p className="text-xs text-muted-foreground">
-          Round: {activeRound.round_type} · order is hidden until each reveal.
+          Round: {activeRound.round_type}
+          {activeRound.exploration_format && (
+            <> · {formatLabel.get(activeRound.exploration_format) ?? activeRound.exploration_format}</>
+          )}
+          {" "}· order is hidden until each reveal.
         </p>
       )}
     </div>
