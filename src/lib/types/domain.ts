@@ -8,6 +8,13 @@ export type RoleType =
   | "czar"
   | "host"
   | "admin"
+  | "secretary"
+  | "treasurer"
+  | "technology"
+  | "retreat_planner"
+  | "timekeeper"
+  | "norm_observer"
+  | "social_coordinator"
 
 export type Forum = {
   id: string

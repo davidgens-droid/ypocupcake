@@ -87,7 +87,18 @@ export async function updateMember(formData: FormData) {
 // ─── Roles ─────────────────────────────────────────────────────────────────
 const roleSchema = z.object({
   member_id: z.string().uuid().nullable(),
-  role_type: z.enum(["moderator", "assistant_moderator", "czar"]),
+  role_type: z.enum([
+    "moderator",
+    "assistant_moderator",
+    "czar",
+    "secretary",
+    "treasurer",
+    "technology",
+    "retreat_planner",
+    "timekeeper",
+    "norm_observer",
+    "social_coordinator",
+  ]),
   year: z.coerce.number().int().min(2024).max(2100),
 })
 

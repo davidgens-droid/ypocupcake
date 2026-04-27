@@ -15,7 +15,17 @@ import { setSingletonRole } from "@/lib/admin/actions"
 type Member = { id: string; name: string }
 
 type Props = {
-  roleType: "moderator" | "assistant_moderator" | "czar"
+  roleType:
+    | "moderator"
+    | "assistant_moderator"
+    | "czar"
+    | "secretary"
+    | "treasurer"
+    | "technology"
+    | "retreat_planner"
+    | "timekeeper"
+    | "norm_observer"
+    | "social_coordinator"
   label: string
   description: string
   year: number
