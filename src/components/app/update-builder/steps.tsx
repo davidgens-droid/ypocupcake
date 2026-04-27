@@ -1,10 +1,11 @@
 "use client"
 
-import { useTransition } from "react"
-import { X } from "lucide-react"
+import { useState, useTransition } from "react"
+import { ChevronDown, Pencil, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { emailUpdateToSelf } from "@/lib/email/update-email"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -734,71 +735,108 @@ export function StepReview({
     formats.find((f) => f.code === content.topic.exploration_format)
       ?.display_name ?? content.topic.exploration_format
 
-  const Section = ({
-    title,
-    summary,
-    onClick,
-  }: {
-    title: string
-    summary: string
-    onClick: () => void
-  }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center justify-between rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-muted/50"
-    >
-      <span className="font-medium">{title}</span>
-      <span className="ml-3 line-clamp-1 max-w-[60%] text-right text-xs text-muted-foreground">
-        {summary || "—"}
-      </span>
-    </button>
-  )
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="font-heading text-xl font-semibold">Review your update</h2>
-        <p className="text-sm text-muted-foreground">Tap any section to edit.</p>
+        <p className="text-sm text-muted-foreground">
+          Tap a section to expand it, or use the pencil to jump back and edit.
+        </p>
       </div>
 
       <div className="space-y-2">
-        <Section
+        <ReviewSection
+          id="qol"
           title="Quality of Life"
           summary={`${content.qol.physical_health} · ${content.qol.mental_health} · ${content.qol.financial_health} · ${content.qol.friends_community}`}
-          onClick={() => onJumpTo(2)}
-        />
-        <Section
+          isOpen={open.has("qol")}
+          onToggle={() => toggle("qol")}
+          onEdit={() => onJumpTo(2)}
+        >
+          <QolDetail value={content.qol} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="business"
           title="Business"
           summary={content.business.feelings.join(", ")}
-          onClick={() => onJumpTo(3)}
-        />
-        <Section
+          isOpen={open.has("business")}
+          onToggle={() => toggle("business")}
+          onEdit={() => onJumpTo(3)}
+        >
+          <ReflectionDetail value={content.business} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="family"
           title="Family"
           summary={content.family.feelings.join(", ")}
-          onClick={() => onJumpTo(6)}
-        />
-        <Section
+          isOpen={open.has("family")}
+          onToggle={() => toggle("family")}
+          onEdit={() => onJumpTo(6)}
+        >
+          <ReflectionDetail value={content.family} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="personal"
           title="Personal"
           summary={content.personal.feelings.join(", ")}
-          onClick={() => onJumpTo(9)}
-        />
-        <Section
+          isOpen={open.has("personal")}
+          onToggle={() => toggle("personal")}
+          onEdit={() => onJumpTo(9)}
+        >
+          <ReflectionDetail value={content.personal} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="coming_up"
           title="Coming up"
           summary={content.coming_up.text}
-          onClick={() => onJumpTo(12)}
-        />
-        <Section
+          isOpen={open.has("coming_up")}
+          onToggle={() => toggle("coming_up")}
+          onEdit={() => onJumpTo(12)}
+        >
+          <ComingUpDetail value={content.coming_up} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="vampire"
           title="Energy vampire"
           summary={content.energy_vampire}
-          onClick={() => onJumpTo(13)}
-        />
-        <Section
+          isOpen={open.has("vampire")}
+          onToggle={() => toggle("vampire")}
+          onEdit={() => onJumpTo(13)}
+        >
+          <p className="whitespace-pre-line text-sm">
+            {content.energy_vampire || (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </p>
+        </ReviewSection>
+
+        <ReviewSection
+          id="goal"
           title="Goal"
           summary={`${content.goal.text}${content.goal.make_commitment ? " · 📣 commitment" : ""}`}
-          onClick={() => onJumpTo(14)}
-        />
-        <Section
+          isOpen={open.has("goal")}
+          onToggle={() => toggle("goal")}
+          onEdit={() => onJumpTo(14)}
+        >
+          <GoalDetail value={content.goal} />
+        </ReviewSection>
+
+        <ReviewSection
+          id="topic"
           title="Topic to present"
           summary={
             content.topic.text
@@ -809,8 +847,12 @@ export function StepReview({
                 }`
               : ""
           }
-          onClick={() => onJumpTo(15)}
-        />
+          isOpen={open.has("topic")}
+          onToggle={() => toggle("topic")}
+          onEdit={() => onJumpTo(15)}
+        >
+          <TopicDetail value={content.topic} formatLabel={formatLabel} />
+        </ReviewSection>
       </div>
 
       <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">
@@ -831,6 +873,202 @@ export function StepReview({
       </div>
 
       <ExportRow meetingId={meetingId} />
+    </div>
+  )
+}
+
+// ─── Review section helpers ────────────────────────────────────────────────
+function ReviewSection({
+  title,
+  summary,
+  isOpen,
+  onToggle,
+  onEdit,
+  children,
+}: {
+  id: string
+  title: string
+  summary: string
+  isOpen: boolean
+  onToggle: () => void
+  onEdit: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-lg border bg-card">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+      >
+        <span className="flex items-center gap-2 font-medium">
+          <ChevronDown
+            className={cn(
+              "size-4 text-muted-foreground transition-transform",
+              isOpen && "rotate-180"
+            )}
+          />
+          {title}
+        </span>
+        <span className="ml-3 line-clamp-1 max-w-[55%] text-right text-xs text-muted-foreground">
+          {summary || "—"}
+        </span>
+      </button>
+      {isOpen && (
+        <div className="space-y-3 border-t px-3 py-3">
+          {children}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onEdit()
+              }}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Pencil className="size-3" /> Edit this section
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function QolDetail({ value }: { value: UpdateContent["qol"] }) {
+  const fields: Array<[keyof UpdateContent["qol"], string]> = [
+    ["physical_health", "Physical Health"],
+    ["mental_health", "Mental Health"],
+    ["financial_health", "Financial Health"],
+    ["friends_community", "Friends / Community"],
+  ]
+  return (
+    <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+      {fields.map(([k, label]) => (
+        <div key={k} className="rounded-md border bg-background p-2">
+          <dt className="text-xs text-muted-foreground">{label}</dt>
+          <dd className="font-mono text-lg tabular-nums">{value[k]}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ReflectionDetail({ value }: { value: Reflection }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Feelings
+        </p>
+        {value.feelings.length === 0 ? (
+          <p className="text-muted-foreground">—</p>
+        ) : (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {value.feelings.map((f) => (
+              <span
+                key={f}
+                className="rounded-full border bg-secondary px-2 py-0.5 text-xs"
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Situation
+        </p>
+        <p className="whitespace-pre-line">
+          {value.situation || <span className="text-muted-foreground">—</span>}
+        </p>
+      </div>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Significance
+        </p>
+        <ol className="mt-1 list-decimal space-y-1 pl-5">
+          {value.significance.map((s, i) => (
+            <li key={i} className="whitespace-pre-line">
+              {s || <span className="text-muted-foreground">—</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  )
+}
+
+function ComingUpDetail({
+  value,
+}: {
+  value: UpdateContent["coming_up"]
+}) {
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="whitespace-pre-line">
+        {value.text || <span className="text-muted-foreground">—</span>}
+      </p>
+      {value.feelings.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {value.feelings.map((f) => (
+            <span
+              key={f}
+              className="rounded-full border bg-secondary px-2 py-0.5 text-xs"
+            >
+              {f}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GoalDetail({ value }: { value: UpdateContent["goal"] }) {
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="whitespace-pre-line">
+        {value.text || <span className="text-muted-foreground">—</span>}
+      </p>
+      {value.text && (
+        <p className="text-xs text-muted-foreground">
+          Horizon: {value.horizon}
+          {value.make_commitment && " · 📣 forum commitment"}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function TopicDetail({
+  value,
+  formatLabel,
+}: {
+  value: UpdateContent["topic"]
+  formatLabel: string
+}) {
+  return (
+    <div className="space-y-1 text-sm">
+      <p className="whitespace-pre-line">
+        {value.text || <span className="text-muted-foreground">—</span>}
+      </p>
+      {value.publish_to_parking_lot && value.text && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Published to Parking Lot · {value.tool_category} · {formatLabel}
+          </p>
+          {value.context && (
+            <p className="text-xs text-muted-foreground whitespace-pre-line">
+              Context: {value.context}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground capitalize">
+            Urgency: {value.urgency}
+          </p>
+        </>
+      )}
     </div>
   )
 }

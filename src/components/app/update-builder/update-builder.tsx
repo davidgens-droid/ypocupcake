@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, Check } from "lucide-react"
+import { ChevronLeft, Check, ListChecks } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -101,7 +101,7 @@ export function UpdateBuilder({
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col">
       {/* Top bar */}
-      <div className="mb-4 flex items-center justify-between text-sm">
+      <div className="mb-4 flex items-center justify-between gap-2 text-sm">
         <Button
           size="sm"
           variant="ghost"
@@ -109,13 +109,24 @@ export function UpdateBuilder({
         >
           <ChevronLeft className="size-4" /> Dashboard
         </Button>
-        <span className="text-xs text-muted-foreground">
-          {pending
-            ? "Saving…"
-            : savedAt
-              ? `Saved ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-              : "Draft"}
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {pending
+              ? "Saving…"
+              : savedAt
+                ? `Saved ${savedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : "Draft"}
+          </span>
+          {step !== TOTAL_STEPS && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setStep(TOTAL_STEPS)}
+            >
+              <ListChecks className="size-4" /> Review
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Progress dots */}
