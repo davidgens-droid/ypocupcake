@@ -1,8 +1,11 @@
 "use client"
 
+import { useTransition } from "react"
 import { X } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { emailUpdateToSelf } from "@/lib/email/update-email"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -827,18 +830,44 @@ export function StepReview({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          onClick={() =>
-            window.open(`/print/update/${meetingId}`, "_blank")
-          }
-        >
-          Download PDF
-        </Button>
-      </div>
+      <ExportRow meetingId={meetingId} />
+    </div>
+  )
+}
+
+function ExportRow({ meetingId }: { meetingId: string }) {
+  const [pending, startTransition] = useTransition()
+
+  function onEmail() {
+    startTransition(async () => {
+      const result = await emailUpdateToSelf({ meetingId })
+      if (result.ok) {
+        toast.success("Sent. Check your inbox.")
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        onClick={() => window.open(`/print/update/${meetingId}`, "_blank")}
+      >
+        Download PDF
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        onClick={onEmail}
+        disabled={pending}
+      >
+        {pending ? "Sending…" : "Email to me"}
+      </Button>
     </div>
   )
 }
