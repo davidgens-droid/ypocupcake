@@ -1,26 +1,57 @@
 import { NextResponse } from "next/server"
+import type { EmailOtpType } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/server"
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get("code")
   const next = searchParams.get("next") ?? "/dashboard"
 
-  if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=missing_code`)
-  }
+  // Helpful for debugging email-template / flow mismatches.
+  console.log(
+    "[auth/callback] received params:",
+    Object.fromEntries(searchParams)
+  )
 
-  const supabase = await createClient()
-  const { error } = await supabase.auth.exchangeCodeForSession(code)
-  if (error) {
+  // Supabase may bounce back with its own error (e.g. otp_expired). Surface it.
+  const supaError = searchParams.get("error_code") ?? searchParams.get("error")
+  if (supaError) {
     return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(error.message)}`
+      `${origin}/login?error=${encodeURIComponent(supaError)}`
     )
   }
 
-  // Confirm the user has a member row (i.e. was invited). Without one, the
-  // signup trigger left them un-membered.
+  const supabase = await createClient()
+
+  // Two possible flows depending on Supabase email template:
+  //   1. PKCE flow:  ?code=...
+  //   2. OTP flow:   ?token_hash=...&type=email|magiclink|recovery|invite
+  const code = searchParams.get("code")
+  const tokenHash = searchParams.get("token_hash")
+  const type = searchParams.get("type") as EmailOtpType | null
+
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    if (error) {
+      return NextResponse.redirect(
+        `${origin}/login?error=${encodeURIComponent(error.message)}`
+      )
+    }
+  } else if (tokenHash && type) {
+    const { error } = await supabase.auth.verifyOtp({
+      type,
+      token_hash: tokenHash,
+    })
+    if (error) {
+      return NextResponse.redirect(
+        `${origin}/login?error=${encodeURIComponent(error.message)}`
+      )
+    }
+  } else {
+    return NextResponse.redirect(`${origin}/login?error=missing_code`)
+  }
+
+  // Confirm the user has a member row (i.e. was invited).
   const {
     data: { user },
   } = await supabase.auth.getUser()
