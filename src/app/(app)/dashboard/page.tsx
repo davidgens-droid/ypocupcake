@@ -24,11 +24,18 @@ export default async function DashboardPage() {
   const me = await requireCurrentMember()
   const supabase = await createClient()
 
-  const [{ data: nextMeeting }, { data: openCommitments }] = await Promise.all([
+  const today = new Date()
+  const [
+    { data: nextMeeting },
+    { data: openCommitments },
+    { data: roles },
+  ] = await Promise.all([
     supabase
       .from("meetings")
-      .select("id, scheduled_at, location")
-      .gte("scheduled_at", new Date().toISOString())
+      .select("id, scheduled_at, location, status")
+      .or(
+        `scheduled_at.gte.${today.toISOString()},status.eq.in_progress`
+      )
       .order("scheduled_at", { ascending: true })
       .limit(1)
       .maybeSingle(),
@@ -39,10 +46,18 @@ export default async function DashboardPage() {
       .eq("status", "open")
       .order("due_date", { ascending: true, nullsFirst: false })
       .limit(5),
+    supabase
+      .from("roles")
+      .select("role_type")
+      .eq("member_id", me.id)
+      .eq("year", today.getFullYear()),
   ])
 
+  const isModerator = (roles ?? []).some((r) =>
+    ["moderator", "assistant_moderator"].includes(r.role_type)
+  )
+
   const greetingName = me.name.split(" ")[0]
-  const today = new Date()
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -69,6 +84,34 @@ export default async function DashboardPage() {
           </h1>
         )}
       </header>
+
+      {/* Meeting access (when in progress) */}
+      {nextMeeting?.status === "in_progress" && (
+        <Card className="border-foreground">
+          <CardHeader>
+            <CardTitle className="text-base">Meeting in progress</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Button
+              size="lg"
+              className="w-full"
+              render={
+                <Link
+                  href={
+                    isModerator || me.is_admin
+                      ? `/meeting/${nextMeeting.id}/run`
+                      : `/meeting/${nextMeeting.id}`
+                  }
+                />
+              }
+            >
+              {isModerator || me.is_admin
+                ? "Open meeting room (Moderator)"
+                : "Join meeting"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Update CTA */}
       <Card>
@@ -98,6 +141,16 @@ export default async function DashboardPage() {
             <Sparkles className="size-4" />
             Brain-dump with AI
           </Button>
+          {nextMeeting?.status === "upcoming" && (isModerator || me.is_admin) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-fit gap-2"
+              render={<Link href={`/meeting/${nextMeeting.id}/run`} />}
+            >
+              Open meeting setup
+            </Button>
+          )}
         </CardContent>
       </Card>
 
