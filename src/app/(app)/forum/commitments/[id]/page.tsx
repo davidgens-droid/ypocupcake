@@ -5,10 +5,7 @@ import { notFound } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Textarea } from "@/components/ui/textarea"
-import { updateCommitment } from "@/lib/commitments/actions"
+import { CommitmentStatusForm } from "@/components/app/commitments/status-form"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
@@ -64,44 +61,11 @@ export default async function CommitmentDetailPage({
       )}
 
       {isMine ? (
-        <form action={updateCommitment} className="space-y-4">
-          <input type="hidden" name="id" value={c.id} />
-
-          <div className="space-y-2">
-            <Label className="text-sm">Status</Label>
-            <RadioGroup name="status" defaultValue={c.status} className="grid gap-2">
-              {[
-                ["open", "Open — still working on it"],
-                ["done", "Done"],
-                ["carried_over", "Carrying over to next month"],
-                ["dropped", "Dropped — no longer pursuing"],
-              ].map(([k, label]) => (
-                <label
-                  key={k}
-                  className="flex items-start gap-2 rounded-lg border p-2 text-sm"
-                >
-                  <RadioGroupItem value={k} />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </RadioGroup>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="notes" className="text-sm">
-              Notes (visible to forum)
-            </Label>
-            <Textarea
-              id="notes"
-              name="notes"
-              defaultValue={c.notes ?? ""}
-              rows={3}
-              maxLength={2000}
-            />
-          </div>
-
-          <Button type="submit">Save</Button>
-        </form>
+        <CommitmentStatusForm
+          id={c.id}
+          initialStatus={c.status as "open" | "done" | "carried_over" | "dropped"}
+          initialNotes={c.notes ?? ""}
+        />
       ) : (
         <Card>
           <CardContent className="py-3 text-sm text-muted-foreground">
