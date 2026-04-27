@@ -27,7 +27,7 @@ export default async function AdminMeetingsPage() {
       .from("meetings")
       .select("id, scheduled_at, location, host_member_id, status")
       .eq("forum_id", me.forum_id)
-      .order("scheduled_at", { ascending: false }),
+      .order("scheduled_at", { ascending: true }),
     supabase
       .from("members")
       .select("id, name")
@@ -40,9 +40,9 @@ export default async function AdminMeetingsPage() {
   const upcoming = (meetings ?? []).filter(
     (m) => parseISO(m.scheduled_at) >= now && m.status !== "cancelled"
   )
-  const past = (meetings ?? []).filter(
-    (m) => parseISO(m.scheduled_at) < now || m.status === "cancelled"
-  )
+  const past = (meetings ?? [])
+    .filter((m) => parseISO(m.scheduled_at) < now || m.status === "cancelled")
+    .reverse() // most recent past meeting first
 
   return (
     <div className="space-y-6">
