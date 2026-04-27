@@ -54,10 +54,11 @@ export function StepIntro() {
 // ─────────────────────────────────────────────────────────────────────────────
 type QoLProps = {
   value: UpdateContent["qol"]
+  history?: Array<Record<string, number>>
   onChange: (next: UpdateContent["qol"]) => void
 }
 
-export function StepQoL({ value, onChange }: QoLProps) {
+export function StepQoL({ value, history = [], onChange }: QoLProps) {
   const fields = [
     { key: "physical_health", label: "Physical Health" },
     { key: "mental_health", label: "Mental Health" },
@@ -76,28 +77,80 @@ export function StepQoL({ value, onChange }: QoLProps) {
         </p>
       </div>
       <div className="space-y-6">
-        {fields.map((f) => (
-          <div key={f.key} className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm">{f.label}</Label>
-              <span className="font-mono text-sm tabular-nums">
-                {value[f.key]}
-              </span>
+        {fields.map((f) => {
+          const series = history.map((h) => h[f.key]).filter((n) => typeof n === "number")
+          const trend = trendDirection(series)
+          return (
+            <div key={f.key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm">{f.label}</Label>
+                <span className="font-mono text-sm tabular-nums">
+                  {value[f.key]}
+                </span>
+              </div>
+              <Slider
+                min={1}
+                max={10}
+                step={1}
+                value={[value[f.key]]}
+                onValueChange={(v) => {
+                  const next = Array.isArray(v) ? v[0] : v
+                  onChange({ ...value, [f.key]: next })
+                }}
+              />
+              {series.length >= 2 && (
+                <div className="flex items-center gap-2 pt-1">
+                  <Sparkline values={series} />
+                  <span className="text-xs text-muted-foreground">
+                    Last {series.length} · {series.join(", ")}
+                    {trend && <span className="ml-1">{trend}</span>}
+                  </span>
+                </div>
+              )}
             </div>
-            <Slider
-              min={1}
-              max={10}
-              step={1}
-              value={[value[f.key]]}
-              onValueChange={(v) => {
-                const next = Array.isArray(v) ? v[0] : v
-                onChange({ ...value, [f.key]: next })
-              }}
-            />
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
+  )
+}
+
+function trendDirection(series: number[]) {
+  if (series.length < 2) return null
+  const first = series[0]
+  const last = series[series.length - 1]
+  if (last > first) return "↑"
+  if (last < first) return "↓"
+  return "→"
+}
+
+function Sparkline({ values }: { values: number[] }) {
+  const w = 80
+  const h = 16
+  const min = 1
+  const max = 10
+  const step = values.length > 1 ? w / (values.length - 1) : 0
+  const pts = values
+    .map(
+      (v, i) =>
+        `${(i * step).toFixed(1)},${(h - ((v - min) / (max - min)) * h).toFixed(1)}`
+    )
+    .join(" ")
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className="text-muted-foreground"
+      aria-hidden
+    >
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.25"
+        points={pts}
+      />
+    </svg>
   )
 }
 

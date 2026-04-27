@@ -37,6 +37,7 @@ type Props = {
   initialContent: UpdateContent
   initialReady: boolean
   formats: ExplorationFormat[]
+  qolHistory: Array<Record<string, number>>
 }
 
 export function UpdateBuilder({
@@ -45,6 +46,7 @@ export function UpdateBuilder({
   initialContent,
   initialReady,
   formats,
+  qolHistory,
 }: Props) {
   const router = useRouter()
   const [step, setStep] = useState(1)
@@ -144,6 +146,7 @@ export function UpdateBuilder({
         {step === 2 && (
           <StepQoL
             value={content.qol}
+            history={qolHistory}
             onChange={(qol) => setContent((c) => ({ ...c, qol }))}
           />
         )}

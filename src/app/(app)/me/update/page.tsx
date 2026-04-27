@@ -29,7 +29,11 @@ export default async function UpdatePage() {
     return <NoMeetingState />
   }
 
-  const [{ data: existingUpdate }, { data: formatsRaw }] = await Promise.all([
+  const [
+    { data: existingUpdate },
+    { data: formatsRaw },
+    { data: pastUpdates },
+  ] = await Promise.all([
     supabase
       .from("updates")
       .select("content, ready")
@@ -41,9 +45,26 @@ export default async function UpdatePage() {
       .select(
         "code, category, display_name, default_minutes, short_description, moderator_instructions, source_attribution"
       ),
+    supabase
+      .from("updates")
+      .select("content, completed_at, meeting_id")
+      .eq("member_id", me.id)
+      .neq("meeting_id", nextMeeting.id)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: false })
+      .limit(6),
   ])
 
   const formats = (formatsRaw ?? []) as ExplorationFormat[]
+
+  // Pull past QoL values for sparklines (oldest → newest).
+  const qolHistory = (pastUpdates ?? [])
+    .reverse()
+    .map((u) => {
+      const c = u.content as { qol?: Record<string, number> } | null
+      return c?.qol ?? null
+    })
+    .filter(Boolean) as Array<Record<string, number>>
 
   let initialContent: UpdateContent = emptyUpdateContent
   if (existingUpdate?.content) {
@@ -60,6 +81,7 @@ export default async function UpdatePage() {
       initialContent={initialContent}
       initialReady={existingUpdate?.ready ?? false}
       formats={formats}
+      qolHistory={qolHistory}
     />
   )
 }
