@@ -252,6 +252,7 @@ export function UpdateBuilder({
             onReadyChange={setReady}
             onJumpTo={setStep}
             formats={formats}
+            meetingId={meetingId}
           />
         )}
       </div>

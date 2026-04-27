@@ -716,6 +716,7 @@ type ReviewProps = {
   onReadyChange: (b: boolean) => void
   onJumpTo: (step: number) => void
   formats: ExplorationFormat[]
+  meetingId: string
 }
 
 export function StepReview({
@@ -724,6 +725,7 @@ export function StepReview({
   onReadyChange,
   onJumpTo,
   formats,
+  meetingId,
 }: ReviewProps) {
   const formatLabel =
     formats.find((f) => f.code === content.topic.exploration_format)
@@ -823,6 +825,19 @@ export function StepReview({
             anytime.
           </p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() =>
+            window.open(`/print/update/${meetingId}`, "_blank")
+          }
+        >
+          Download PDF
+        </Button>
       </div>
     </div>
   )
