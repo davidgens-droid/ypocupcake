@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { notifyMember } from "@/lib/notifications/actions"
 import { createClient } from "@/lib/supabase/server"
 
 const recordSchema = z.object({
@@ -109,6 +110,23 @@ export async function addComment(formData: FormData) {
     body: parsed.body,
   })
   if (error) throw new Error(error.message)
+
+  // Notify the photo's uploader (unless they're commenting on their own photo).
+  const { data: photo } = await supabase
+    .from("photos")
+    .select("uploader_member_id, caption")
+    .eq("id", parsed.photo_id)
+    .single()
+  if (photo && photo.uploader_member_id !== me.id) {
+    await notifyMember({
+      memberId: photo.uploader_member_id,
+      kind: "photo_comment",
+      title: `${me.name} commented on your photo`,
+      detail: parsed.body.slice(0, 140),
+      link: `/forum/photos/${parsed.photo_id}`,
+    })
+  }
+
   revalidatePath(`/forum/photos/${parsed.photo_id}`)
 }
 

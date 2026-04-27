@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { notifyMember } from "@/lib/notifications/actions"
 import { createClient } from "@/lib/supabase/server"
 
 const newItemSchema = z.object({
@@ -50,6 +51,17 @@ export async function createParkingLotItem(formData: FormData) {
     .single()
 
   if (error) throw new Error(error.message)
+
+  // Notify the submitter when the czar adds on behalf.
+  if (submitterId !== me.id) {
+    await notifyMember({
+      memberId: submitterId,
+      kind: "czar_added_topic",
+      title: "Czar added a topic on your behalf",
+      detail: parsed.topic,
+      link: `/forum/parking-lot/${data.id}`,
+    })
+  }
 
   revalidatePath("/forum/parking-lot")
   redirect(`/forum/parking-lot/${data.id}`)
