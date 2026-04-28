@@ -1,5 +1,7 @@
 import Link from "next/link"
 import { format, parseISO } from "date-fns"
+
+import { formatMeeting } from "@/lib/dates"
 import {
   ArrowRight,
   Sparkles,
@@ -81,8 +83,8 @@ export default async function DashboardPage() {
         {nextMeeting ? (
           <>
             <h1 className="font-heading text-2xl font-semibold">
-              {format(parseISO(nextMeeting.scheduled_at), "EEE MMM d")} ·{" "}
-              {format(parseISO(nextMeeting.scheduled_at), "h:mm a")}
+              {formatMeeting(nextMeeting.scheduled_at, "EEE MMM d")} ·{" "}
+              {formatMeeting(nextMeeting.scheduled_at, "h:mm a")}
             </h1>
             <p className="text-sm text-muted-foreground">
               <Calendar className="mr-1 inline size-3.5" />

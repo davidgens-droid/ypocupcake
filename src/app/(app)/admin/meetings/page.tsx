@@ -1,5 +1,7 @@
-import { format, parseISO } from "date-fns"
+import { parseISO } from "date-fns"
 import { CalendarPlus, Trash2 } from "lucide-react"
+
+import { formatMeeting } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -155,7 +157,7 @@ function MeetingRow({ meeting, hostName }: MeetingRowProps) {
         <CardContent className="flex items-start justify-between gap-2 py-3 text-sm">
           <div className="space-y-0.5">
             <p className="font-medium">
-              {format(parseISO(meeting.scheduled_at), "EEE MMM d, yyyy · h:mm a")}
+              {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
             </p>
             <p className="text-xs text-muted-foreground">
               📍 {meeting.location ?? "TBD"}

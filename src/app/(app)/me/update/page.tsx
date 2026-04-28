@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { format, parseISO } from "date-fns"
+import { formatMeeting } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -72,7 +72,7 @@ export default async function UpdatePage() {
     if (parsed.success) initialContent = parsed.data
   }
 
-  const meetingLabel = format(parseISO(nextMeeting.scheduled_at), "EEE MMM d")
+  const meetingLabel = formatMeeting(nextMeeting.scheduled_at, "EEE MMM d")
 
   return (
     <UpdateBuilder

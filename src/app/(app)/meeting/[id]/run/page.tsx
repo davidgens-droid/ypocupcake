@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { format, parseISO } from "date-fns"
+import { formatMeeting } from "@/lib/dates"
 import { ChevronLeft } from "lucide-react"
 import { notFound, redirect } from "next/navigation"
 
@@ -92,7 +92,7 @@ export default async function RunMeetingPage({
 
       <div>
         <h1 className="font-heading text-2xl font-semibold">
-          {format(parseISO(meeting.scheduled_at), "EEE MMM d, yyyy · h:mm a")}
+          {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
         </h1>
         <p className="text-sm text-muted-foreground">
           📍 {meeting.location ?? "TBD"} · status:{" "}

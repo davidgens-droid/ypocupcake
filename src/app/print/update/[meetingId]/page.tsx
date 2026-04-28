@@ -1,6 +1,7 @@
 import { format, parseISO } from "date-fns"
 import { notFound } from "next/navigation"
 
+import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -85,7 +86,7 @@ export default async function PrintUpdatePage({
     ])
   )
 
-  const meetingDate = format(parseISO(meeting.scheduled_at), "EEE, MMM d, yyyy")
+  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy")
 
   return (
     <>

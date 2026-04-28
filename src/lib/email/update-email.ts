@@ -2,6 +2,7 @@
 
 import { format, parseISO } from "date-fns"
 
+import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -57,7 +58,7 @@ export async function emailUpdateToSelf(input: { meetingId: string }) {
     ])
   )
 
-  const meetingDate = format(parseISO(meeting.scheduled_at), "EEE, MMM d, yyyy")
+  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy")
   const subject = `Your Cupcake update — ${meetingDate}`
   const html = renderHtml({
     name: me.name,
