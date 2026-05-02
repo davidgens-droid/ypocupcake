@@ -163,7 +163,7 @@ export function BrainDumpDialog({ onContentReady }: Props) {
         Brain-dump
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="size-4" /> Brain-dump mode
           </DialogTitle>
@@ -172,9 +172,9 @@ export function BrainDumpDialog({ onContentReady }: Props) {
             and you can review every section before saving.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
           <Textarea
-            rows={10}
+            rows={6}
             value={text + (interim ? (text.endsWith(" ") || !text ? "" : " ") + interim : "")}
             onChange={(e) => {
               if (recording) return // freeze edits while listening
@@ -183,7 +183,10 @@ export function BrainDumpDialog({ onContentReady }: Props) {
             placeholder="What's been going on for you this last month? Business, family, personal — say it however it comes out."
             disabled={pending}
             autoFocus
-            className={cn(interim && "italic")}
+            className={cn(
+              "min-h-32 max-h-[40dvh] resize-none",
+              interim && "italic"
+            )}
           />
           <div className="flex items-center justify-between gap-2">
             {supportsVoice ? (
@@ -219,7 +222,7 @@ export function BrainDumpDialog({ onContentReady }: Props) {
             ever see the result.
           </p>
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex shrink-0 justify-end gap-2 border-t pt-3">
           <Button
             type="button"
             variant="ghost"
