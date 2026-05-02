@@ -1,10 +1,18 @@
 "use client"
 
 import { useState, useTransition } from "react"
-import { ChevronDown, Pencil, X } from "lucide-react"
+import { ChevronDown, Pencil, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { emailUpdateToSelf } from "@/lib/email/update-email"
 import { Card, CardContent } from "@/components/ui/card"
@@ -719,6 +727,7 @@ type ReviewProps = {
   ready: boolean
   onReadyChange: (b: boolean) => void
   onJumpTo: (step: number) => void
+  onClearAll: () => void
   formats: ExplorationFormat[]
   meetingId: string
 }
@@ -728,6 +737,7 @@ export function StepReview({
   ready,
   onReadyChange,
   onJumpTo,
+  onClearAll,
   formats,
   meetingId,
 }: ReviewProps) {
@@ -873,7 +883,59 @@ export function StepReview({
       </div>
 
       <ExportRow meetingId={meetingId} />
+
+      <ClearAllRow onConfirm={onClearAll} />
     </div>
+  )
+}
+
+function ClearAllRow({ onConfirm }: { onConfirm: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-fit gap-2 text-destructive hover:bg-destructive/10"
+          />
+        }
+      >
+        <Trash2 className="size-4" />
+        Clear all and start over
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Clear your update?</DialogTitle>
+          <DialogDescription>
+            This wipes every field in this update — Quality of Life sliders,
+            feelings, situation, significance, coming-up, energy vampire, goal,
+            and topic. <strong>This cannot be undone.</strong>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => {
+              onConfirm()
+              setOpen(false)
+            }}
+          >
+            Yes, clear everything
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

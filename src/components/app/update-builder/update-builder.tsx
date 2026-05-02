@@ -262,6 +262,25 @@ export function UpdateBuilder({
             ready={ready}
             onReadyChange={setReady}
             onJumpTo={setStep}
+            onClearAll={() => {
+              setContent(emptyUpdateContent)
+              setReady(false)
+              startTransition(async () => {
+                try {
+                  await saveUpdateDraft({
+                    meetingId,
+                    content: emptyUpdateContent,
+                  })
+                  setSavedAt(new Date())
+                  toast.success("Update cleared.")
+                  setStep(1)
+                } catch (err) {
+                  toast.error(
+                    err instanceof Error ? err.message : "Couldn't clear update."
+                  )
+                }
+              })
+            }}
             formats={formats}
             meetingId={meetingId}
           />
