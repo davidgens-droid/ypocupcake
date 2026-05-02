@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
-import { Mic, Sparkles, Square } from "lucide-react"
+import { Loader2, Mic, Sparkles, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,15 @@ function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null
 }
 
+const THINKING_MESSAGES = [
+  "Reading your update…",
+  "Finding the threads…",
+  "Drafting feelings…",
+  "Going deeper on significance…",
+  "Pulling it together…",
+  "Almost there…",
+]
+
 export function BrainDumpDialog({ onContentReady }: Props) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
@@ -61,6 +70,19 @@ export function BrainDumpDialog({ onContentReady }: Props) {
   const [recording, setRecording] = useState(false)
   const [supportsVoice, setSupportsVoice] = useState(false)
   const [pending, startTransition] = useTransition()
+  const [thinkingMsg, setThinkingMsg] = useState(THINKING_MESSAGES[0])
+
+  // Cycle thinking messages while pending so the dialog doesn't feel frozen.
+  useEffect(() => {
+    if (!pending) return
+    setThinkingMsg(THINKING_MESSAGES[0])
+    let i = 0
+    const id = setInterval(() => {
+      i = (i + 1) % THINKING_MESSAGES.length
+      setThinkingMsg(THINKING_MESSAGES[i])
+    }, 2200)
+    return () => clearInterval(id)
+  }, [pending])
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
 
@@ -173,54 +195,77 @@ export function BrainDumpDialog({ onContentReady }: Props) {
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-          <Textarea
-            rows={6}
-            value={text + (interim ? (text.endsWith(" ") || !text ? "" : " ") + interim : "")}
-            onChange={(e) => {
-              if (recording) return // freeze edits while listening
-              setText(e.target.value)
-            }}
-            placeholder="What's been going on for you this last month? Business, family, personal — say it however it comes out."
-            disabled={pending}
-            autoFocus
-            className={cn(
-              "min-h-32 max-h-[40dvh] resize-none",
-              interim && "italic"
-            )}
-          />
-          <div className="flex items-center justify-between gap-2">
-            {supportsVoice ? (
-              <Button
-                type="button"
-                size="sm"
-                variant={recording ? "default" : "outline"}
-                onClick={recording ? stopRecording : startRecording}
-                disabled={pending}
-                className={cn("gap-2", recording && "animate-pulse")}
+          {pending ? (
+            <div className="flex min-h-48 flex-col items-center justify-center gap-4 py-8">
+              <div className="relative">
+                <Loader2 className="size-12 animate-spin text-muted-foreground" />
+                <Sparkles className="absolute inset-0 m-auto size-5 text-foreground" />
+              </div>
+              <p
+                key={thinkingMsg}
+                className="animate-in fade-in text-sm font-medium duration-500"
               >
-                {recording ? (
-                  <>
-                    <Square className="size-4 fill-current" /> Stop recording
-                  </>
-                ) : (
-                  <>
-                    <Mic className="size-4" /> Start recording
-                  </>
+                {thinkingMsg}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Claude Opus 4.7 is reasoning through your dump. Usually 10–30s.
+              </p>
+            </div>
+          ) : (
+            <>
+              <Textarea
+                rows={6}
+                value={
+                  text +
+                  (interim
+                    ? (text.endsWith(" ") || !text ? "" : " ") + interim
+                    : "")
+                }
+                onChange={(e) => {
+                  if (recording) return // freeze edits while listening
+                  setText(e.target.value)
+                }}
+                placeholder="What's been going on for you this last month? Business, family, personal — say it however it comes out."
+                autoFocus
+                className={cn(
+                  "min-h-32 max-h-[40dvh] resize-none",
+                  interim && "italic"
                 )}
-              </Button>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                Voice input not supported in this browser.
-              </span>
-            )}
-            <span className="text-xs text-muted-foreground">
-              {recording ? "Listening…" : `${text.length} chars`}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Privacy: this is processed by Claude with zero retention. Only you
-            ever see the result.
-          </p>
+              />
+              <div className="flex items-center justify-between gap-2">
+                {supportsVoice ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={recording ? "default" : "outline"}
+                    onClick={recording ? stopRecording : startRecording}
+                    className={cn("gap-2", recording && "animate-pulse")}
+                  >
+                    {recording ? (
+                      <>
+                        <Square className="size-4 fill-current" /> Stop recording
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="size-4" /> Start recording
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Voice input not supported in this browser.
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {recording ? "Listening…" : `${text.length} chars`}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Privacy: this is processed by Claude with zero retention. Only
+                you ever see the result.
+              </p>
+            </>
+          )}
         </div>
         <div className="flex shrink-0 justify-end gap-2 border-t pt-3">
           <Button
@@ -235,8 +280,15 @@ export function BrainDumpDialog({ onContentReady }: Props) {
             type="button"
             onClick={onGenerate}
             disabled={pending || text.trim().length < 10}
+            className="gap-2"
           >
-            {pending ? "Structuring…" : "Generate update"}
+            {pending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" /> Structuring…
+              </>
+            ) : (
+              "Generate update"
+            )}
           </Button>
         </div>
       </DialogContent>
