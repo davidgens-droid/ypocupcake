@@ -177,7 +177,11 @@ export function BrainDumpDialog({ onContentReady }: Props) {
             type="button"
             variant="outline"
             size="sm"
-            className="fixed bottom-20 right-4 z-30 gap-2 shadow-lg md:bottom-6"
+            // The update builder has a sticky bottom nav (Back / Next | Finalize)
+            // at `bottom-16` on mobile / `bottom-0` on desktop, ~56px tall.
+            // We sit the FAB clearly above it on every viewport so it never
+            // covers the Finalize button on the review step.
+            className="fixed right-4 z-30 gap-2 shadow-lg bottom-36 md:bottom-20"
           />
         }
       >
