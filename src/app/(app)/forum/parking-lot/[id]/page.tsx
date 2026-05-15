@@ -66,6 +66,20 @@ export default async function ParkingLotItemPage({
   const isEditable = isSubmitter && item.status === "parked"
   const isClosed = item.status === "presented" || item.status === "archived"
 
+  // Privileged roles can edit any item at any status.
+  const { data: rolesRaw } = await supabase
+    .from("roles")
+    .select("role_type")
+    .eq("member_id", me.id)
+    .eq("year", new Date().getFullYear())
+  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
+  const isPrivileged =
+    me.is_admin ||
+    myRoles.includes("moderator") ||
+    myRoles.includes("assistant_moderator") ||
+    myRoles.includes("czar")
+  const canEdit = isPrivileged || isEditable
+
   const withdraw = async () => {
     "use server"
     await withdrawParkingLotItem(id)
@@ -165,6 +179,15 @@ export default async function ParkingLotItemPage({
       )}
 
       <section className="flex flex-wrap gap-2 pt-2">
+        {canEdit && (
+          <Button
+            size="sm"
+            variant="outline"
+            render={<Link href={`/forum/parking-lot/${id}/edit`} />}
+          >
+            Edit
+          </Button>
+        )}
         {isEditable && (
           <form action={withdraw}>
             <Button size="sm" variant="outline" type="submit">

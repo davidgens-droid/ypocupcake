@@ -68,6 +68,50 @@ export async function createParkingLotItem(formData: FormData) {
   redirect(`/forum/parking-lot/${data.id}`)
 }
 
+const editItemSchema = z.object({
+  id: z.string().uuid(),
+  topic: z.string().trim().min(1).max(500),
+  context: z.string().trim().max(2000).optional().default(""),
+  urgency: z.enum(["low", "med", "high"]),
+  tool_category: z.enum(["EQ", "IQ"]),
+  exploration_format: z.string().min(1),
+  submitter_member_id: z.string().uuid(),
+})
+
+export async function updateParkingLotItem(formData: FormData) {
+  await requireCurrentMember()
+  const parsed = editItemSchema.parse({
+    id: formData.get("id"),
+    topic: formData.get("topic"),
+    context: formData.get("context") ?? "",
+    urgency: formData.get("urgency"),
+    tool_category: formData.get("tool_category"),
+    exploration_format: formData.get("exploration_format"),
+    submitter_member_id: formData.get("submitter_member_id"),
+  })
+
+  const supabase = await createClient()
+  // RLS handles permission (submitter while parked, OR czar/moderator/admin
+  // anytime via parking_lot_privileged_manage policy).
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({
+      topic: parsed.topic,
+      context: parsed.context.trim() || null,
+      urgency: parsed.urgency,
+      tool_category: parsed.tool_category,
+      exploration_format: parsed.exploration_format,
+      submitter_member_id: parsed.submitter_member_id,
+    })
+    .eq("id", parsed.id)
+
+  if (error) throw new Error(error.message)
+
+  revalidatePath("/forum/parking-lot")
+  revalidatePath(`/forum/parking-lot/${parsed.id}`)
+  redirect(`/forum/parking-lot/${parsed.id}`)
+}
+
 export async function withdrawParkingLotItem(id: string) {
   const me = await requireCurrentMember()
   const supabase = await createClient()
