@@ -56,7 +56,10 @@ export default async function ParkingLotItemPage({
 
   const submitter =
     (members ?? []).find((m) => m.id === item.submitter_member_id)?.name ?? "—"
-  const addedByCzar = item.added_by_member_id !== item.submitter_member_id
+  const addedByOther = item.added_by_member_id !== item.submitter_member_id
+  const addedByName = addedByOther
+    ? (members ?? []).find((m) => m.id === item.added_by_member_id)?.name ?? "another member"
+    : null
 
   const fmt = (formats ?? []).find((f) => f.code === item.exploration_format)
   const isSubmitter = item.submitter_member_id === me.id
@@ -93,7 +96,7 @@ export default async function ParkingLotItemPage({
         <h1 className="font-heading text-2xl font-semibold">{item.topic}</h1>
         <p className="text-sm text-muted-foreground">
           Submitted by {submitter}
-          {addedByCzar && " (added by Czar)"} ·{" "}
+          {addedByOther && ` (added by ${addedByName})`} ·{" "}
           {format(parseISO(item.created_at), "MMM d, yyyy")}
         </p>
       </div>

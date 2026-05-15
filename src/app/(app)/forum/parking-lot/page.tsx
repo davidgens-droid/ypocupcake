@@ -123,7 +123,7 @@ export default async function ParkingLotPage({
         <ul className="space-y-2">
           {items!.map((item) => {
             const submitter = memberName.get(item.submitter_member_id) ?? "—"
-            const addedByCzar =
+            const addedByOther =
               item.added_by_member_id !== item.submitter_member_id
             const fmt = formatLabel.get(item.exploration_format) ?? item.exploration_format
             return (
@@ -149,7 +149,8 @@ export default async function ParkingLotPage({
                     )}
                     <p className="text-xs text-muted-foreground">
                       Submitted by {submitter}
-                      {addedByCzar && " (added by Czar)"}
+                      {addedByOther &&
+                        ` (added by ${memberName.get(item.added_by_member_id) ?? "another member"})`}
                       {" · "}
                       {format(parseISO(item.created_at), "MMM d")}
                     </p>

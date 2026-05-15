@@ -52,12 +52,13 @@ export async function createParkingLotItem(formData: FormData) {
 
   if (error) throw new Error(error.message)
 
-  // Notify the submitter when the czar adds on behalf.
+  // Notify the submitter when someone else (czar / moderator / admin) adds
+  // on their behalf.
   if (submitterId !== me.id) {
     await notifyMember({
       memberId: submitterId,
-      kind: "czar_added_topic",
-      title: "Czar added a topic on your behalf",
+      kind: "topic_added_on_behalf",
+      title: `${me.name} parked a topic for you`,
       detail: parsed.topic,
       link: `/forum/parking-lot/${data.id}`,
     })

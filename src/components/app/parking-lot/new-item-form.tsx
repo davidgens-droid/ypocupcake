@@ -30,8 +30,11 @@ type Member = { id: string; name: string }
 
 type Props = {
   formats: ExplorationFormat[]
-  members?: Member[] // present when caller is a Czar
-  isCzar: boolean
+  members?: Member[] // present when caller can submit on behalf
+  /** True when the caller is Czar / Moderator / Asst Moderator / Admin. */
+  canSubmitOnBehalf: boolean
+  /** "Czar", "Moderator", "Admin" — surfaced in the on-behalf hint. */
+  onBehalfLabel: string
   defaultSubmitterId?: string
   defaultTopic?: string
 }
@@ -39,7 +42,8 @@ type Props = {
 export function NewItemForm({
   formats,
   members,
-  isCzar,
+  canSubmitOnBehalf,
+  onBehalfLabel,
   defaultSubmitterId,
   defaultTopic = "",
 }: Props) {
@@ -82,11 +86,11 @@ export function NewItemForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-5">
-      {isCzar && members && (
+      {canSubmitOnBehalf && members && (
         <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
           <p className="text-xs text-muted-foreground">
-            You&apos;re submitting on behalf of another member. The item will
-            show &ldquo;added by Czar.&rdquo;
+            Pick the submitter. If you choose another member, the item will show
+            &ldquo;added by {onBehalfLabel}.&rdquo;
           </p>
           <div className="space-y-1">
             <Label className="text-sm">Submitter</Label>
@@ -263,11 +267,15 @@ export function NewItemForm({
         <Button
           type="submit"
           className="ml-auto"
-          disabled={pending || !topic.trim() || (isCzar && !submitterId)}
+          disabled={
+            pending || !topic.trim() || (canSubmitOnBehalf && !submitterId)
+          }
         >
           {pending
             ? "Submitting…"
-            : isCzar && submitterId
+            : canSubmitOnBehalf &&
+                submitterId &&
+                submitterId !== defaultSubmitterId
               ? "Submit on behalf"
               : "Submit topic"}
         </Button>
