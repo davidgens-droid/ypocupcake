@@ -6,6 +6,14 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -16,7 +24,9 @@ import {
   advanceExploration,
   advanceRound,
   adjustTimer,
+  cancelActiveRound,
   closeMeeting,
+  resetMeeting,
   startExploration,
   startMeeting,
   startRound,
@@ -171,6 +181,23 @@ export function RunnerControls({
           >
             Close meeting & wrap
           </Button>
+
+          <ConfirmDialog
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-destructive hover:bg-destructive/10"
+              >
+                Reset meeting (start over)
+              </Button>
+            }
+            title="Reset this meeting?"
+            description="Deletes all rounds and returns the meeting to its 'upcoming' state so you can re-start from the lobby. Parking-lot items scheduled into this meeting go back to 'parked'."
+            confirmLabel="Yes, reset"
+            disabled={pending}
+            onConfirm={() => run(() => resetMeeting(meetingId))}
+          />
         </div>
       )
     }
@@ -261,6 +288,23 @@ export function RunnerControls({
                   : `Next phase: ${phases[phaseIdx + 1]?.name}`}
             </Button>
           </div>
+
+          <ConfirmDialog
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:bg-destructive/10"
+              >
+                Cancel this exploration
+              </Button>
+            }
+            title="Cancel this exploration?"
+            description="Ends the current exploration and returns you to the meeting lobby. The parking-lot item goes back to 'parked' so you can start fresh."
+            confirmLabel="Yes, cancel"
+            disabled={pending}
+            onConfirm={() => run(() => cancelActiveRound(meetingId))}
+          />
         </div>
       )
     }
@@ -329,14 +373,98 @@ export function RunnerControls({
             {done ? "Finished" : `✓ Done · Reveal next 🎲`}
           </Button>
         </div>
+
+        <ConfirmDialog
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+            >
+              Cancel this round
+            </Button>
+          }
+          title="Cancel this round?"
+          description="Ends the current round immediately. You'll return to the meeting lobby and can start a fresh round — the random order will be regenerated."
+          confirmLabel="Yes, cancel round"
+          disabled={pending}
+          onConfirm={() => run(() => cancelActiveRound(meetingId))}
+        />
       </div>
     )
   }
 
   // ── 3. Closed/cancelled ───────────────────────────────────────────────────
   return (
-    <div className="rounded-lg border bg-muted/40 p-4 text-center text-sm text-muted-foreground">
-      Meeting is {status}.
+    <div className="space-y-3">
+      <div className="rounded-lg border bg-muted/40 p-4 text-center text-sm text-muted-foreground">
+        Meeting is {status}.
+      </div>
+      <ConfirmDialog
+        trigger={
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-destructive hover:bg-destructive/10"
+          >
+            Reset meeting (re-open)
+          </Button>
+        }
+        title="Re-open this meeting?"
+        description="Returns the meeting to its 'upcoming' state so you can start it again. All previous rounds will be discarded."
+        confirmLabel="Yes, reset"
+        disabled={pending}
+        onConfirm={() => run(() => resetMeeting(meetingId))}
+      />
     </div>
+  )
+}
+
+function ConfirmDialog({
+  trigger,
+  title,
+  description,
+  confirmLabel,
+  disabled,
+  onConfirm,
+}: {
+  trigger: React.ReactNode
+  title: string
+  description: string
+  confirmLabel: string
+  disabled?: boolean
+  onConfirm: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={trigger as React.ReactElement} />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={disabled}
+            onClick={() => {
+              onConfirm()
+              setOpen(false)
+            }}
+          >
+            {confirmLabel}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

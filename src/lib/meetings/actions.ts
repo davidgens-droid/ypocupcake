@@ -155,6 +155,66 @@ export async function adjustTimer(roundId: string, deltaSeconds: number) {
   revalidatePath(`/meeting/${round.meeting_id}/run`)
 }
 
+/**
+ * Cancel whatever round is active right now — ends the round so the runner
+ * returns to the "what to run next" screen. For exploration rounds, also
+ * resets the linked parking-lot item back to "parked" so it can be re-run.
+ */
+export async function cancelActiveRound(meetingId: string) {
+  const { supabase } = await ensureMod()
+  const { data: active } = await supabase
+    .from("meeting_rounds")
+    .select("id, round_type, parking_lot_item_id")
+    .eq("meeting_id", meetingId)
+    .is("ended_at", null)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!active) return
+
+  const now = new Date().toISOString()
+  await supabase
+    .from("meeting_rounds")
+    .update({ ended_at: now, current_started_at: null })
+    .eq("id", active.id)
+
+  if (active.round_type === "exploration" && active.parking_lot_item_id) {
+    await supabase
+      .from("parking_lot_items")
+      .update({ status: "parked", scheduled_meeting_id: null })
+      .eq("id", active.parking_lot_item_id)
+  }
+
+  revalidatePath(`/meeting/${meetingId}/run`)
+  revalidatePath(`/meeting/${meetingId}`)
+}
+
+/**
+ * Nuclear reset — wipes all rounds for this meeting and returns it to the
+ * "upcoming" state, so the moderator can re-Start it from scratch. Also frees
+ * any parking-lot items that were scheduled into this meeting.
+ */
+export async function resetMeeting(meetingId: string) {
+  const { supabase } = await ensureMod()
+
+  await supabase
+    .from("parking_lot_items")
+    .update({ status: "parked", scheduled_meeting_id: null })
+    .eq("scheduled_meeting_id", meetingId)
+    .eq("status", "scheduled")
+
+  await supabase.from("meeting_rounds").delete().eq("meeting_id", meetingId)
+
+  await supabase
+    .from("meetings")
+    .update({ status: "upcoming", closed_at: null })
+    .eq("id", meetingId)
+
+  revalidatePath(`/meeting/${meetingId}/run`)
+  revalidatePath(`/meeting/${meetingId}`)
+  revalidatePath("/dashboard")
+}
+
 export async function endRound(roundId: string) {
   const { supabase } = await ensureMod()
   const { data: round } = await supabase
