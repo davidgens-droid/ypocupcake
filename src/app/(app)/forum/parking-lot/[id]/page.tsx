@@ -21,6 +21,8 @@ import {
   reparkItem,
   withdrawParkingLotItem,
 } from "@/lib/parking-lot/actions"
+import { ScheduleControl } from "@/components/app/parking-lot/schedule-control"
+import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
@@ -35,22 +37,32 @@ export default async function ParkingLotItemPage({
   const { id } = await params
   const supabase = await createClient()
 
-  const [{ data: item }, { data: formats }, { data: members }] =
-    await Promise.all([
-      supabase
-        .from("parking_lot_items")
-        .select(
-          "id, topic, context, urgency, tool_category, exploration_format, status, submitter_member_id, added_by_member_id, created_at, presented_at, takeaways, scheduled_meeting_id"
-        )
-        .eq("id", id)
-        .maybeSingle(),
-      supabase
-        .from("exploration_formats")
-        .select(
-          "code, display_name, default_minutes, category, short_description, moderator_instructions"
-        ),
-      supabase.from("members").select("id, name"),
-    ])
+  const [
+    { data: item },
+    { data: formats },
+    { data: members },
+    { data: upcomingMeetings },
+  ] = await Promise.all([
+    supabase
+      .from("parking_lot_items")
+      .select(
+        "id, topic, context, urgency, tool_category, exploration_format, status, submitter_member_id, added_by_member_id, created_at, presented_at, takeaways, scheduled_meeting_id"
+      )
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("exploration_formats")
+      .select(
+        "code, display_name, default_minutes, category, short_description, moderator_instructions"
+      ),
+    supabase.from("members").select("id, name"),
+    supabase
+      .from("meetings")
+      .select("id, scheduled_at, location, status")
+      .or(`status.eq.upcoming,status.eq.in_progress`)
+      .gte("scheduled_at", new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString())
+      .order("scheduled_at", { ascending: true }),
+  ])
 
   if (!item) notFound()
 
@@ -176,6 +188,37 @@ export default async function ParkingLotItemPage({
             </CardContent>
           </Card>
         </section>
+      )}
+
+      {/* Show currently-scheduled meeting to everyone */}
+      {item.scheduled_meeting_id && (() => {
+        const m = (upcomingMeetings ?? []).find(
+          (x) => x.id === item.scheduled_meeting_id
+        )
+        if (!m) return null
+        return (
+          <section className="space-y-2">
+            <h2 className="text-sm font-semibold">Scheduled for</h2>
+            <Card>
+              <CardContent className="py-3 text-sm">
+                {formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
+                {m.location ? ` · ${m.location}` : ""}
+              </CardContent>
+            </Card>
+          </section>
+        )
+      })()}
+
+      {/* Schedule control for privileged roles */}
+      {isPrivileged && item.status !== "presented" && item.status !== "archived" && (
+        <ScheduleControl
+          itemId={item.id}
+          currentMeetingId={item.scheduled_meeting_id}
+          status={item.status}
+          upcomingMeetings={(upcomingMeetings ?? []).filter(
+            (m) => m.status === "upcoming" || m.status === "in_progress"
+          )}
+        />
       )}
 
       <section className="flex flex-wrap gap-2 pt-2">

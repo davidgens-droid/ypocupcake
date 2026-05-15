@@ -112,6 +112,50 @@ export async function updateParkingLotItem(formData: FormData) {
   redirect(`/forum/parking-lot/${parsed.id}`)
 }
 
+// ─── Schedule / unschedule (admin / moderator / asst-moderator / czar) ─────
+export async function scheduleParkingLotItem(input: {
+  itemId: string
+  meetingId: string
+}) {
+  await requireCurrentMember()
+  const supabase = await createClient()
+  // RLS handles permission (parking_lot_privileged_manage from migration 0011).
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({
+      status: "scheduled",
+      scheduled_meeting_id: input.meetingId,
+    })
+    .eq("id", input.itemId)
+  if (error) throw new Error(error.message)
+  revalidatePath("/forum/parking-lot")
+  revalidatePath(`/forum/parking-lot/${input.itemId}`)
+  revalidatePath(`/meeting/${input.meetingId}/run`)
+}
+
+export async function unscheduleParkingLotItem(itemId: string) {
+  await requireCurrentMember()
+  const supabase = await createClient()
+  const { data: existing } = await supabase
+    .from("parking_lot_items")
+    .select("scheduled_meeting_id")
+    .eq("id", itemId)
+    .single()
+  const prevMeetingId = existing?.scheduled_meeting_id ?? null
+
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({
+      status: "parked",
+      scheduled_meeting_id: null,
+    })
+    .eq("id", itemId)
+  if (error) throw new Error(error.message)
+  revalidatePath("/forum/parking-lot")
+  revalidatePath(`/forum/parking-lot/${itemId}`)
+  if (prevMeetingId) revalidatePath(`/meeting/${prevMeetingId}/run`)
+}
+
 export async function withdrawParkingLotItem(id: string) {
   const me = await requireCurrentMember()
   const supabase = await createClient()
