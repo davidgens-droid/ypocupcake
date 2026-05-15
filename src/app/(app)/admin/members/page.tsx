@@ -12,6 +12,10 @@ import { createClient } from "@/lib/supabase/server"
 
 export default async function AdminMembersPage() {
   const me = await requireCurrentMember()
+  if (!me.is_admin) {
+    const { redirect } = await import("next/navigation")
+    redirect("/admin/meetings")
+  }
   const supabase = await createClient()
 
   const [{ data: members }, { data: invites }] = await Promise.all([

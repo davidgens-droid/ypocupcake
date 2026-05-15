@@ -12,6 +12,23 @@ async function ensureAdmin() {
   return me
 }
 
+/** Admin OR Moderator OR Assistant Moderator — for actions on meetings. */
+async function ensureMeetingManager() {
+  const me = await requireCurrentMember()
+  if (me.is_admin) return me
+  const supabase = await createClient()
+  const { data: roles } = await supabase
+    .from("roles")
+    .select("role_type")
+    .eq("member_id", me.id)
+    .eq("year", new Date().getFullYear())
+  const isMod = (roles ?? []).some((r) =>
+    ["moderator", "assistant_moderator"].includes(r.role_type)
+  )
+  if (!isMod) throw new Error("Admin or Moderator only.")
+  return me
+}
+
 // ─── Member invites ─────────────────────────────────────────────────────────
 const inviteSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -144,7 +161,7 @@ const newMeetingSchema = z.object({
 })
 
 export async function createMeeting(formData: FormData) {
-  const me = await ensureAdmin()
+  const me = await ensureMeetingManager()
   const parsed = newMeetingSchema.parse({
     scheduled_at_local: formData.get("scheduled_at_local"),
     location: formData.get("location") ?? "",
@@ -170,7 +187,7 @@ const updateMeetingSchema = newMeetingSchema.extend({
 })
 
 export async function updateMeeting(formData: FormData) {
-  await ensureAdmin()
+  await ensureMeetingManager()
   const parsed = updateMeetingSchema.parse({
     id: formData.get("id"),
     scheduled_at_local: formData.get("scheduled_at_local"),
@@ -195,7 +212,7 @@ export async function updateMeeting(formData: FormData) {
 }
 
 export async function deleteMeeting(formData: FormData) {
-  await ensureAdmin()
+  await ensureMeetingManager()
   const id = String(formData.get("id") ?? "")
   const supabase = await createClient()
   const { error } = await supabase.from("meetings").delete().eq("id", id)

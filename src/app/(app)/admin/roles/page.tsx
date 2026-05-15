@@ -71,6 +71,10 @@ const ROLES: Array<{
 
 export default async function AdminRolesPage() {
   const me = await requireCurrentMember()
+  if (!me.is_admin) {
+    const { redirect } = await import("next/navigation")
+    redirect("/admin/meetings")
+  }
   const year = new Date().getFullYear()
   const supabase = await createClient()
 

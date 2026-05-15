@@ -1,6 +1,7 @@
 import { parseISO } from "date-fns"
 import { CalendarPlus, Trash2 } from "lucide-react"
 
+import { EditMeetingDialog } from "@/components/app/admin/edit-meeting-dialog"
 import { formatMeeting } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
@@ -111,6 +112,7 @@ export default async function AdminMeetingsPage() {
                 hostName={
                   m.host_member_id ? memberName.get(m.host_member_id) : null
                 }
+                members={members ?? []}
               />
             ))}
           </ul>
@@ -130,6 +132,7 @@ export default async function AdminMeetingsPage() {
                 hostName={
                   m.host_member_id ? memberName.get(m.host_member_id) : null
                 }
+                members={members ?? []}
               />
             ))}
           </ul>
@@ -148,9 +151,10 @@ type MeetingRowProps = {
     status: string
   }
   hostName: string | null | undefined
+  members: { id: string; name: string }[]
 }
 
-function MeetingRow({ meeting, hostName }: MeetingRowProps) {
+function MeetingRow({ meeting, hostName, members }: MeetingRowProps) {
   return (
     <li>
       <Card>
@@ -165,17 +169,20 @@ function MeetingRow({ meeting, hostName }: MeetingRowProps) {
               <span className="uppercase tracking-wide">{meeting.status}</span>
             </p>
           </div>
-          <form action={deleteMeeting}>
-            <input type="hidden" name="id" value={meeting.id} />
-            <Button
-              type="submit"
-              size="sm"
-              variant="ghost"
-              title="Delete meeting"
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          </form>
+          <div className="flex items-center gap-1">
+            <EditMeetingDialog meeting={meeting} members={members} />
+            <form action={deleteMeeting}>
+              <input type="hidden" name="id" value={meeting.id} />
+              <Button
+                type="submit"
+                size="sm"
+                variant="ghost"
+                title="Delete meeting"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </form>
+          </div>
         </CardContent>
       </Card>
     </li>

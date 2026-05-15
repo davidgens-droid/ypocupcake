@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation"
 
-export default function AdminIndex() {
-  redirect("/admin/members")
+import { requireCurrentMember } from "@/lib/auth/current-member"
+
+export default async function AdminIndex() {
+  const me = await requireCurrentMember()
+  redirect(me.is_admin ? "/admin/members" : "/admin/meetings")
 }
