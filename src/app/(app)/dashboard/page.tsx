@@ -1,12 +1,13 @@
 import Link from "next/link"
 import { format, parseISO } from "date-fns"
 
-import { formatMeeting } from "@/lib/dates"
+import { formatMeeting, meetingPastCutoffISO } from "@/lib/dates"
 import {
   ArrowRight,
   Sparkles,
   Calendar,
   AlertTriangle,
+  History,
   Image as ImageIcon,
   PlusCircle,
 } from "lucide-react"
@@ -39,8 +40,9 @@ export default async function DashboardPage() {
       .from("meetings")
       .select("id, scheduled_at, location, status")
       .or(
-        `scheduled_at.gte.${today.toISOString()},status.eq.in_progress`
+        `scheduled_at.gte.${meetingPastCutoffISO(today)},status.eq.in_progress`
       )
+      .neq("status", "cancelled")
       .order("scheduled_at", { ascending: true })
       .limit(1)
       .maybeSingle(),
@@ -174,6 +176,14 @@ export default async function DashboardPage() {
               Open meeting setup
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-fit gap-2"
+            render={<Link href="/me/history" />}
+          >
+            <History className="size-4" /> View past updates
+          </Button>
         </CardContent>
       </Card>
 

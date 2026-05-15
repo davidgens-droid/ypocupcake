@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { formatMeeting } from "@/lib/dates"
+import { formatMeeting, meetingPastCutoffISO } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,7 +20,8 @@ export default async function UpdatePage() {
   const { data: nextMeeting } = await supabase
     .from("meetings")
     .select("id, scheduled_at, location")
-    .gte("scheduled_at", new Date().toISOString())
+    .gte("scheduled_at", meetingPastCutoffISO())
+    .neq("status", "cancelled")
     .order("scheduled_at", { ascending: true })
     .limit(1)
     .maybeSingle()
@@ -98,9 +99,14 @@ function NoMeetingState() {
             Updates are tied to a specific meeting. Once a meeting is on the
             calendar, you&apos;ll be able to start your update here.
           </p>
-          <Button variant="outline" size="sm" render={<Link href="/dashboard" />}>
-            Back to dashboard
-          </Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="outline" size="sm" render={<Link href="/me/history" />}>
+              View past updates
+            </Button>
+            <Button variant="ghost" size="sm" render={<Link href="/dashboard" />}>
+              Back to dashboard
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

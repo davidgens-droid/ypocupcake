@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { forumLocalInputToISO } from "@/lib/dates"
 import { createClient } from "@/lib/supabase/server"
 
 async function ensureAdmin() {
@@ -169,7 +170,7 @@ export async function createMeeting(formData: FormData) {
   })
 
   const supabase = await createClient()
-  const isoDate = new Date(parsed.scheduled_at_local).toISOString()
+  const isoDate = forumLocalInputToISO(parsed.scheduled_at_local)
   const { error } = await supabase.from("meetings").insert({
     forum_id: me.forum_id,
     scheduled_at: isoDate,
@@ -200,7 +201,7 @@ export async function updateMeeting(formData: FormData) {
   const { error } = await supabase
     .from("meetings")
     .update({
-      scheduled_at: new Date(parsed.scheduled_at_local).toISOString(),
+      scheduled_at: forumLocalInputToISO(parsed.scheduled_at_local),
       location: parsed.location.trim() || null,
       host_member_id: parsed.host_member_id || null,
       status: parsed.status,

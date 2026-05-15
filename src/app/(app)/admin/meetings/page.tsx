@@ -1,8 +1,7 @@
-import { parseISO } from "date-fns"
 import { CalendarPlus, Trash2 } from "lucide-react"
 
 import { EditMeetingDialog } from "@/components/app/admin/edit-meeting-dialog"
-import { formatMeeting } from "@/lib/dates"
+import { formatMeeting, isMeetingPast } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -40,11 +39,13 @@ export default async function AdminMeetingsPage() {
 
   const memberName = new Map((members ?? []).map((m) => [m.id, m.name]))
   const now = new Date()
+  // A meeting only becomes "past" 8h after its start time (lets in-flight
+  // meetings stay in the upcoming list, and gives a buffer for late finishes).
   const upcoming = (meetings ?? []).filter(
-    (m) => parseISO(m.scheduled_at) >= now && m.status !== "cancelled"
+    (m) => !isMeetingPast(m.scheduled_at, now) && m.status !== "cancelled"
   )
   const past = (meetings ?? [])
-    .filter((m) => parseISO(m.scheduled_at) < now || m.status === "cancelled")
+    .filter((m) => isMeetingPast(m.scheduled_at, now) || m.status === "cancelled")
     .reverse() // most recent past meeting first
 
   return (
