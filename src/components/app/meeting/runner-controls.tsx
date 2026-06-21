@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, Circle, CircleDot } from "lucide-react"
+import { Check, Circle, CircleDot, ClipboardList } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
@@ -22,6 +23,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { RoundTimer } from "@/components/app/meeting/round-timer"
+import { CaptureTopicButton } from "@/components/app/meeting/capture-topic-button"
 import {
   advanceExploration,
   advanceRound,
@@ -66,6 +68,7 @@ type Props = {
   } | null
   memberName: Record<string, string>
   parkingLotChoices: ParkingLotChoice[]
+  capturedCount: number
 }
 
 export function RunnerControls({
@@ -74,6 +77,7 @@ export function RunnerControls({
   activeRound,
   memberName,
   parkingLotChoices,
+  capturedCount,
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -92,6 +96,18 @@ export function RunnerControls({
       }
     })
   }
+
+  const reviewButton =
+    capturedCount > 0 ? (
+      <Button
+        variant="outline"
+        className="w-full gap-2"
+        render={<Link href={`/meeting/${meetingId}/parking-lot-review`} />}
+      >
+        <ClipboardList className="size-4" /> Review captured topics (
+        {capturedCount})
+      </Button>
+    ) : null
 
   // ── 1. Lobby ──────────────────────────────────────────────────────────────
   if (status === "upcoming") {
@@ -175,6 +191,8 @@ export function RunnerControls({
               </Button>
             </div>
           )}
+
+          {reviewButton}
 
           <Button
             variant="ghost"
@@ -299,6 +317,13 @@ export function RunnerControls({
           {/* Has-round phase, someone presenting → done + reveal next */}
           {phase.has_round && presenting && (
             <div className="space-y-2">
+              {upNow && order[idx] && (
+                <CaptureTopicButton
+                  meetingId={meetingId}
+                  presenterMemberId={order[idx]}
+                  presenterName={upNow}
+                />
+              )}
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
@@ -463,6 +488,13 @@ export function RunnerControls({
         {/* Presenting state — timer controls + done/reveal-next */}
         {!done && presenting && (
           <div className="space-y-3">
+            {upNow && order[idx] && (
+              <CaptureTopicButton
+                meetingId={meetingId}
+                presenterMemberId={order[idx]}
+                presenterName={upNow}
+              />
+            )}
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
@@ -544,6 +576,7 @@ export function RunnerControls({
       <div className="rounded-lg border bg-muted/40 p-4 text-center text-sm text-muted-foreground">
         Meeting is {status}.
       </div>
+      {reviewButton}
       <ConfirmDialog
         trigger={
           <Button

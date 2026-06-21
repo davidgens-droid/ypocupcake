@@ -44,6 +44,7 @@ const STATUS_LABEL: Record<string, string> = {
   presented: "Presented",
   archived: "Archived",
   withdrawn: "Withdrawn",
+  captured: "Captured in meeting",
 }
 
 export function StatusBadge({ value }: { value: string }) {

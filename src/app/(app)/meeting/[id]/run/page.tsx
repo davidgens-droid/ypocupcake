@@ -34,30 +34,41 @@ export default async function RunMeetingPage({
     redirect(`/meeting/${id}`)
   }
 
-  const [{ data: meeting }, { data: members }, { data: rounds }, { data: parking }, { data: formats }] =
-    await Promise.all([
-      supabase
-        .from("meetings")
-        .select("id, scheduled_at, location, status")
-        .eq("id", id)
-        .maybeSingle(),
-      supabase.from("members").select("id, name"),
-      supabase
-        .from("meeting_rounds")
-        .select(
-          "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
-        )
-        .eq("meeting_id", id)
-        .order("started_at", { ascending: false }),
-      supabase
-        .from("parking_lot_items")
-        .select("id, topic, exploration_format, status, scheduled_meeting_id")
-        .in("status", ["parked", "scheduled"])
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("exploration_formats")
-        .select("code, display_name, default_minutes"),
-    ])
+  const [
+    { data: meeting },
+    { data: members },
+    { data: rounds },
+    { data: parking },
+    { data: formats },
+    { count: capturedCount },
+  ] = await Promise.all([
+    supabase
+      .from("meetings")
+      .select("id, scheduled_at, location, status")
+      .eq("id", id)
+      .maybeSingle(),
+    supabase.from("members").select("id, name"),
+    supabase
+      .from("meeting_rounds")
+      .select(
+        "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
+      )
+      .eq("meeting_id", id)
+      .order("started_at", { ascending: false }),
+    supabase
+      .from("parking_lot_items")
+      .select("id, topic, exploration_format, status, scheduled_meeting_id")
+      .in("status", ["parked", "scheduled"])
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("exploration_formats")
+      .select("code, display_name, default_minutes"),
+    supabase
+      .from("parking_lot_items")
+      .select("id", { count: "exact", head: true })
+      .eq("captured_meeting_id", id)
+      .eq("status", "captured"),
+  ])
 
   if (!meeting) notFound()
 
@@ -108,6 +119,7 @@ export default async function RunMeetingPage({
             activeRound={activeRound}
             memberName={memberName}
             parkingLotChoices={parkingLotChoices}
+            capturedCount={capturedCount ?? 0}
           />
         </CardContent>
       </Card>

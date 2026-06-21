@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import {
+  mergeParkingLotItemsAI,
+  type MergeItemInput,
+} from "@/lib/ai/merge-parking-lot"
 import { notifyMember } from "@/lib/notifications/actions"
 import { createClient } from "@/lib/supabase/server"
 
@@ -154,6 +158,194 @@ export async function unscheduleParkingLotItem(itemId: string) {
   revalidatePath("/forum/parking-lot")
   revalidatePath(`/forum/parking-lot/${itemId}`)
   if (prevMeetingId) revalidatePath(`/meeting/${prevMeetingId}/run`)
+}
+
+// ─── Live capture during a meeting (admin / moderator / asst-mod / czar) ────
+const captureSchema = z.object({
+  meetingId: z.string().uuid(),
+  presenterMemberId: z.string().uuid(),
+  topic: z.string().trim().min(1).max(500),
+  context: z.string().trim().max(2000).optional().default(""),
+})
+
+/**
+ * Jot a parking-lot item for the member currently presenting, while a meeting
+ * runs. Lands in the 'captured' holding status tied to the meeting; reconciled
+ * afterward on the parking-lot review screen. Permission is enforced by the
+ * parking_lot_privileged_insert RLS policy.
+ */
+export async function captureParkingLotItem(
+  input: z.infer<typeof captureSchema>
+) {
+  const me = await requireCurrentMember()
+  const parsed = captureSchema.parse(input)
+  const supabase = await createClient()
+
+  const { error } = await supabase.from("parking_lot_items").insert({
+    forum_id: me.forum_id,
+    submitter_member_id: parsed.presenterMemberId,
+    added_by_member_id: me.id,
+    topic: parsed.topic,
+    context: parsed.context.trim() || null,
+    urgency: "med",
+    tool_category: "EQ",
+    exploration_format: "fsfe",
+    status: "captured",
+    captured_meeting_id: parsed.meetingId,
+  })
+  if (error) throw new Error(error.message)
+
+  revalidatePath(`/meeting/${parsed.meetingId}/run`)
+  revalidatePath(`/meeting/${parsed.meetingId}`)
+  revalidatePath(`/meeting/${parsed.meetingId}/parking-lot-review`)
+}
+
+// ─── Post-meeting reconciliation (admin / moderator / asst-mod / czar) ──────
+/** Discard a captured item. RLS parking_lot_privileged_delete restricts this. */
+export async function deleteCapturedItem(itemId: string) {
+  await requireCurrentMember()
+  const supabase = await createClient()
+
+  const { data: item } = await supabase
+    .from("parking_lot_items")
+    .select("captured_meeting_id")
+    .eq("id", itemId)
+    .single()
+
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("status", "captured")
+  if (error) throw new Error(error.message)
+
+  revalidatePath("/forum/parking-lot")
+  if (item?.captured_meeting_id)
+    revalidatePath(`/meeting/${item.captured_meeting_id}/parking-lot-review`)
+}
+
+/** Keep a captured item — promote it to a normal parked item. */
+export async function parkCapturedItem(itemId: string) {
+  await requireCurrentMember()
+  const supabase = await createClient()
+
+  const { data: item } = await supabase
+    .from("parking_lot_items")
+    .select("captured_meeting_id")
+    .eq("id", itemId)
+    .single()
+
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({ status: "parked", captured_meeting_id: null })
+    .eq("id", itemId)
+    .eq("status", "captured")
+  if (error) throw new Error(error.message)
+
+  revalidatePath("/forum/parking-lot")
+  if (item?.captured_meeting_id)
+    revalidatePath(`/meeting/${item.captured_meeting_id}/parking-lot-review`)
+}
+
+function higherUrgency(
+  a: "low" | "med" | "high",
+  b: "low" | "med" | "high"
+): "low" | "med" | "high" {
+  const rank = { low: 0, med: 1, high: 2 }
+  return rank[a] >= rank[b] ? a : b
+}
+
+/** Deterministic fallback when the AI merge is unavailable. */
+function deterministicMerge(
+  captured: MergeItemInput,
+  target: MergeItemInput
+): MergeItemInput {
+  const addLine = `Merged in: ${captured.topic}${
+    captured.context ? ` — ${captured.context}` : ""
+  }`
+  const context = [target.context, addLine].filter(Boolean).join("\n\n")
+  return {
+    topic: target.topic,
+    context: context.slice(0, 2000) || null,
+    urgency: higherUrgency(target.urgency, captured.urgency),
+    tool_category: target.tool_category,
+    exploration_format: target.exploration_format,
+  }
+}
+
+const mergeSchema = z.object({
+  capturedId: z.string().uuid(),
+  targetId: z.string().uuid(),
+})
+
+/**
+ * Merge a captured item into an existing parked item: AI combines both into the
+ * parked item, then the captured item is removed. Falls back to a deterministic
+ * merge if the AI is unavailable, so reconciliation never blocks.
+ */
+export async function mergeCapturedIntoParked(
+  input: z.infer<typeof mergeSchema>
+) {
+  await requireCurrentMember()
+  const { capturedId, targetId } = mergeSchema.parse(input)
+  if (capturedId === targetId) throw new Error("Can't merge an item with itself.")
+  const supabase = await createClient()
+
+  const { data: rows, error: fetchErr } = await supabase
+    .from("parking_lot_items")
+    .select(
+      "id, topic, context, urgency, tool_category, exploration_format, captured_meeting_id, status"
+    )
+    .in("id", [capturedId, targetId])
+  if (fetchErr) throw new Error(fetchErr.message)
+
+  const captured = (rows ?? []).find((r) => r.id === capturedId)
+  const target = (rows ?? []).find((r) => r.id === targetId)
+  if (!captured || !target) throw new Error("Item not found.")
+
+  const capturedInput: MergeItemInput = {
+    topic: captured.topic,
+    context: captured.context,
+    urgency: captured.urgency,
+    tool_category: captured.tool_category,
+    exploration_format: captured.exploration_format,
+  }
+  const targetInput: MergeItemInput = {
+    topic: target.topic,
+    context: target.context,
+    urgency: target.urgency,
+    tool_category: target.tool_category,
+    exploration_format: target.exploration_format,
+  }
+
+  const merged =
+    (await mergeParkingLotItemsAI(capturedInput, targetInput)) ??
+    deterministicMerge(capturedInput, targetInput)
+
+  const meetingId = captured.captured_meeting_id
+
+  const { error: updErr } = await supabase
+    .from("parking_lot_items")
+    .update({
+      topic: merged.topic,
+      context: merged.context,
+      urgency: merged.urgency,
+      tool_category: merged.tool_category,
+      exploration_format: merged.exploration_format,
+    })
+    .eq("id", targetId)
+  if (updErr) throw new Error(updErr.message)
+
+  const { error: delErr } = await supabase
+    .from("parking_lot_items")
+    .delete()
+    .eq("id", capturedId)
+    .eq("status", "captured")
+  if (delErr) throw new Error(delErr.message)
+
+  revalidatePath("/forum/parking-lot")
+  revalidatePath(`/forum/parking-lot/${targetId}`)
+  if (meetingId) revalidatePath(`/meeting/${meetingId}/parking-lot-review`)
 }
 
 // ─── Mark discussed (admin / moderator / asst-moderator / czar) ────────────

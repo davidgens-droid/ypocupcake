@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { RoundTimer } from "@/components/app/meeting/round-timer"
+import { CaptureTopicButton } from "@/components/app/meeting/capture-topic-button"
 import {
   getCurrentPhase,
   getPhases,
@@ -38,6 +39,8 @@ type Props = {
   status: string
   activeRound: ActiveRound | null
   myMemberId: string
+  isPrivileged?: boolean
+  memberName?: Record<string, string>
 }
 
 export function MemberMeetingView({
@@ -45,6 +48,8 @@ export function MemberMeetingView({
   status,
   activeRound,
   myMemberId,
+  isPrivileged = false,
+  memberName = {},
 }: Props) {
   useMeetingRealtime(meetingId)
 
@@ -88,6 +93,15 @@ export function MemberMeetingView({
       myIndex === activeRound.current_index
     const selecting =
       hasPresenterRound && activeRound.current_started_at == null
+
+    // The member currently presenting (for privileged live-capture).
+    const presenterId =
+      hasPresenterRound &&
+      activeRound.current_started_at != null &&
+      activeRound.current_index < activeRound.order_member_ids.length
+        ? activeRound.order_member_ids[activeRound.current_index]
+        : null
+    const presenterName = presenterId ? memberName[presenterId] : null
 
     const label = isExploration
       ? phase?.name ?? "Exploration"
@@ -133,6 +147,16 @@ export function MemberMeetingView({
                 ? "The moderator is choosing who's next."
                 : "The order is hidden — your turn may come at any time."}
             </p>
+          )}
+          {isPrivileged && presenterId && presenterName && (
+            <div className="flex justify-center pt-1">
+              <CaptureTopicButton
+                meetingId={meetingId}
+                presenterMemberId={presenterId}
+                presenterName={presenterName}
+                variant="ghost"
+              />
+            </div>
           )}
         </CardContent>
       </Card>
