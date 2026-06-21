@@ -70,7 +70,7 @@ export default async function ParkingLotReviewPage({
     supabase.from("members").select("id, name"),
     supabase
       .from("exploration_formats")
-      .select("code, display_name, default_minutes"),
+      .select("code, display_name, default_minutes, category"),
   ])
 
   if (!meeting) notFound()
@@ -110,6 +110,11 @@ export default async function ParkingLotReviewPage({
         parked={(parkedRaw ?? []) as ReviewItem[]}
         memberName={memberName}
         formatLabel={formatLabel}
+        formats={(formats ?? []).map((f) => ({
+          code: f.code,
+          display_name: f.display_name,
+          category: f.category,
+        }))}
       />
     </div>
   )

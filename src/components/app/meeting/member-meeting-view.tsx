@@ -2,7 +2,10 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { RoundTimer } from "@/components/app/meeting/round-timer"
-import { CaptureTopicButton } from "@/components/app/meeting/capture-topic-button"
+import {
+  CaptureTopicButton,
+  type FormatOption,
+} from "@/components/app/meeting/capture-topic-button"
 import {
   getCurrentPhase,
   getPhases,
@@ -41,6 +44,7 @@ type Props = {
   myMemberId: string
   isPrivileged?: boolean
   memberName?: Record<string, string>
+  formats?: FormatOption[]
 }
 
 export function MemberMeetingView({
@@ -50,6 +54,7 @@ export function MemberMeetingView({
   myMemberId,
   isPrivileged = false,
   memberName = {},
+  formats = [],
 }: Props) {
   useMeetingRealtime(meetingId)
 
@@ -154,6 +159,7 @@ export function MemberMeetingView({
                 meetingId={meetingId}
                 presenterMemberId={presenterId}
                 presenterName={presenterName}
+                formats={formats}
                 variant="ghost"
               />
             </div>

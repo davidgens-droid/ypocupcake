@@ -15,27 +15,35 @@ export default async function MeetingPage({ params }: { params: Params }) {
   const { id } = await params
   const supabase = await createClient()
 
-  const [{ data: meeting }, { data: rounds }, { data: members }, { data: rolesRaw }] =
-    await Promise.all([
-      supabase
-        .from("meetings")
-        .select("id, scheduled_at, location, status")
-        .eq("id", id)
-        .maybeSingle(),
-      supabase
-        .from("meeting_rounds")
-        .select(
-          "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
-        )
-        .eq("meeting_id", id)
-        .order("started_at", { ascending: false }),
-      supabase.from("members").select("id, name"),
-      supabase
-        .from("roles")
-        .select("role_type")
-        .eq("member_id", me.id)
-        .eq("year", new Date().getFullYear()),
-    ])
+  const [
+    { data: meeting },
+    { data: rounds },
+    { data: members },
+    { data: rolesRaw },
+    { data: formats },
+  ] = await Promise.all([
+    supabase
+      .from("meetings")
+      .select("id, scheduled_at, location, status")
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("meeting_rounds")
+      .select(
+        "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
+      )
+      .eq("meeting_id", id)
+      .order("started_at", { ascending: false }),
+    supabase.from("members").select("id, name"),
+    supabase
+      .from("roles")
+      .select("role_type")
+      .eq("member_id", me.id)
+      .eq("year", new Date().getFullYear()),
+    supabase
+      .from("exploration_formats")
+      .select("code, display_name, category"),
+  ])
 
   if (!meeting) notFound()
 
@@ -76,6 +84,7 @@ export default async function MeetingPage({ params }: { params: Params }) {
         myMemberId={me.id}
         isPrivileged={isPrivileged}
         memberName={memberName}
+        formats={formats ?? []}
       />
     </div>
   )

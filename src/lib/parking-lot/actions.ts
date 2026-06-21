@@ -161,11 +161,25 @@ export async function unscheduleParkingLotItem(itemId: string) {
 }
 
 // ─── Live capture during a meeting (admin / moderator / asst-mod / czar) ────
+/** Look up a format's EQ/IQ category; defaults to EQ if unknown. */
+async function categoryForFormat(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  code: string
+): Promise<"EQ" | "IQ"> {
+  const { data } = await supabase
+    .from("exploration_formats")
+    .select("category")
+    .eq("code", code)
+    .maybeSingle()
+  return data?.category === "IQ" ? "IQ" : "EQ"
+}
+
 const captureSchema = z.object({
   meetingId: z.string().uuid(),
   presenterMemberId: z.string().uuid(),
   topic: z.string().trim().min(1).max(500),
   context: z.string().trim().max(2000).optional().default(""),
+  exploration_format: z.string().min(1).optional().default("fsfe"),
 })
 
 /**
@@ -181,6 +195,8 @@ export async function captureParkingLotItem(
   const parsed = captureSchema.parse(input)
   const supabase = await createClient()
 
+  const tool_category = await categoryForFormat(supabase, parsed.exploration_format)
+
   const { error } = await supabase.from("parking_lot_items").insert({
     forum_id: me.forum_id,
     submitter_member_id: parsed.presenterMemberId,
@@ -188,8 +204,8 @@ export async function captureParkingLotItem(
     topic: parsed.topic,
     context: parsed.context.trim() || null,
     urgency: "med",
-    tool_category: "EQ",
-    exploration_format: "fsfe",
+    tool_category,
+    exploration_format: parsed.exploration_format,
     status: "captured",
     captured_meeting_id: parsed.meetingId,
   })
@@ -198,6 +214,48 @@ export async function captureParkingLotItem(
   revalidatePath(`/meeting/${parsed.meetingId}/run`)
   revalidatePath(`/meeting/${parsed.meetingId}`)
   revalidatePath(`/meeting/${parsed.meetingId}/parking-lot-review`)
+}
+
+const updateCapturedSchema = z.object({
+  itemId: z.string().uuid(),
+  topic: z.string().trim().min(1).max(500),
+  context: z.string().trim().max(2000).optional().default(""),
+  urgency: z.enum(["low", "med", "high"]),
+  exploration_format: z.string().min(1),
+})
+
+/** Edit a still-captured item's fields during post-meeting review. */
+export async function updateCapturedItem(
+  input: z.infer<typeof updateCapturedSchema>
+) {
+  await requireCurrentMember()
+  const parsed = updateCapturedSchema.parse(input)
+  const supabase = await createClient()
+
+  const { data: item } = await supabase
+    .from("parking_lot_items")
+    .select("captured_meeting_id")
+    .eq("id", parsed.itemId)
+    .single()
+
+  const tool_category = await categoryForFormat(supabase, parsed.exploration_format)
+
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({
+      topic: parsed.topic,
+      context: parsed.context.trim() || null,
+      urgency: parsed.urgency,
+      exploration_format: parsed.exploration_format,
+      tool_category,
+    })
+    .eq("id", parsed.itemId)
+    .eq("status", "captured")
+  if (error) throw new Error(error.message)
+
+  revalidatePath("/forum/parking-lot")
+  if (item?.captured_meeting_id)
+    revalidatePath(`/meeting/${item.captured_meeting_id}/parking-lot-review`)
 }
 
 // ─── Post-meeting reconciliation (admin / moderator / asst-mod / czar) ──────

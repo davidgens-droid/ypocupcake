@@ -62,7 +62,7 @@ export default async function RunMeetingPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("exploration_formats")
-      .select("code, display_name, default_minutes"),
+      .select("code, display_name, default_minutes, category"),
     supabase
       .from("parking_lot_items")
       .select("id", { count: "exact", head: true })
@@ -120,6 +120,11 @@ export default async function RunMeetingPage({
             memberName={memberName}
             parkingLotChoices={parkingLotChoices}
             capturedCount={capturedCount ?? 0}
+            formats={(formats ?? []).map((f) => ({
+              code: f.code,
+              display_name: f.display_name,
+              category: f.category,
+            }))}
           />
         </CardContent>
       </Card>

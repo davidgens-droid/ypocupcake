@@ -17,29 +17,52 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select"
 import { captureParkingLotItem } from "@/lib/parking-lot/actions"
+
+export type FormatOption = {
+  code: string
+  display_name: string
+  category?: string
+}
 
 type Props = {
   meetingId: string
   presenterMemberId: string
   presenterName: string
+  formats: FormatOption[]
   /** "outline" (runner) or "ghost" (member view) */
   variant?: "outline" | "ghost"
 }
+
+const DEFAULT_FORMAT = "fsfe" // Four-Step Forum Exploration
 
 export function CaptureTopicButton({
   meetingId,
   presenterMemberId,
   presenterName,
+  formats,
   variant = "outline",
 }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [topic, setTopic] = useState("")
   const [context, setContext] = useState("")
+  const [formatCode, setFormatCode] = useState<string>(
+    formats.some((f) => f.code === DEFAULT_FORMAT)
+      ? DEFAULT_FORMAT
+      : formats[0]?.code ?? DEFAULT_FORMAT
+  )
   const [pending, startTransition] = useTransition()
 
   const firstName = presenterName.split(" ")[0]
+  const formatLabel =
+    formats.find((f) => f.code === formatCode)?.display_name ?? "Pick a format"
 
   function onSave() {
     if (topic.trim().length < 2) {
@@ -53,6 +76,7 @@ export function CaptureTopicButton({
           presenterMemberId,
           topic,
           context,
+          exploration_format: formatCode,
         })
         toast.success(`Parked a topic for ${firstName}.`)
         setTopic("")
@@ -104,6 +128,25 @@ export function CaptureTopicButton({
               maxLength={2000}
               placeholder="Anything that would help frame it later."
             />
+          </div>
+          <div className="space-y-2">
+            <Label>Exploration type</Label>
+            <Select
+              value={formatCode}
+              onValueChange={(v) => setFormatCode(v ?? formatCode)}
+            >
+              <SelectTrigger className="w-full">
+                <span data-slot="select-value">{formatLabel}</span>
+              </SelectTrigger>
+              <SelectContent>
+                {formats.map((f) => (
+                  <SelectItem key={f.code} value={f.code}>
+                    {f.display_name}
+                    {f.category ? ` · ${f.category}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-2">

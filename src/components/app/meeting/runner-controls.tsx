@@ -23,7 +23,10 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { RoundTimer } from "@/components/app/meeting/round-timer"
-import { CaptureTopicButton } from "@/components/app/meeting/capture-topic-button"
+import {
+  CaptureTopicButton,
+  type FormatOption,
+} from "@/components/app/meeting/capture-topic-button"
 import {
   advanceExploration,
   advanceRound,
@@ -69,6 +72,7 @@ type Props = {
   memberName: Record<string, string>
   parkingLotChoices: ParkingLotChoice[]
   capturedCount: number
+  formats: FormatOption[]
 }
 
 export function RunnerControls({
@@ -78,6 +82,7 @@ export function RunnerControls({
   memberName,
   parkingLotChoices,
   capturedCount,
+  formats,
 }: Props) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -323,6 +328,7 @@ export function RunnerControls({
                   meetingId={meetingId}
                   presenterMemberId={order[idx]}
                   presenterName={upNow}
+                  formats={formats}
                 />
               )}
               <div className="flex items-center gap-2">
@@ -495,6 +501,7 @@ export function RunnerControls({
                 meetingId={meetingId}
                 presenterMemberId={order[idx]}
                 presenterName={upNow}
+                formats={formats}
               />
             )}
             <div className="flex items-center gap-2">
