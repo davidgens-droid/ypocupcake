@@ -9,6 +9,7 @@ import {
   StatusBadge,
   UrgencyDot,
 } from "@/components/app/parking-lot/status-pill"
+import { MarkDiscussedButton } from "@/components/app/parking-lot/mark-discussed-button"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
@@ -26,7 +27,7 @@ export default async function ParkingLotPage({
 }: {
   searchParams: SearchParams
 }) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const { status: statusParam } = await searchParams
   const status = STATUS_TABS.find((t) => t.key === statusParam)?.key ?? "parked"
 
@@ -36,6 +37,7 @@ export default async function ParkingLotPage({
     { data: formats },
     { data: members },
     { data: counts },
+    { data: rolesRaw },
   ] = await Promise.all([
     supabase
       .from("parking_lot_items")
@@ -51,7 +53,20 @@ export default async function ParkingLotPage({
     supabase
       .from("parking_lot_items")
       .select("status", { count: "exact", head: false }),
+    supabase
+      .from("roles")
+      .select("role_type")
+      .eq("member_id", me.id)
+      .eq("year", new Date().getFullYear()),
   ])
+
+  // Admin / moderator / asst-moderator / czar can mark items discussed.
+  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
+  const isPrivileged =
+    me.is_admin ||
+    myRoles.includes("moderator") ||
+    myRoles.includes("assistant_moderator") ||
+    myRoles.includes("czar")
 
   const formatLabel = new Map(
     (formats ?? []).map((f) => [
@@ -126,11 +141,17 @@ export default async function ParkingLotPage({
             const addedByOther =
               item.added_by_member_id !== item.submitter_member_id
             const fmt = formatLabel.get(item.exploration_format) ?? item.exploration_format
+            const canMarkDiscussed =
+              isPrivileged &&
+              (item.status === "parked" || item.status === "scheduled")
             return (
-              <li key={item.id}>
+              <li
+                key={item.id}
+                className="overflow-hidden rounded-lg border bg-card"
+              >
                 <Link
                   href={`/forum/parking-lot/${item.id}`}
-                  className="block rounded-lg border bg-card transition-colors hover:bg-muted/40"
+                  className="block transition-colors hover:bg-muted/40"
                 >
                   <div className="flex flex-col gap-2 p-3">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -156,6 +177,11 @@ export default async function ParkingLotPage({
                     </p>
                   </div>
                 </Link>
+                {canMarkDiscussed && (
+                  <div className="flex justify-end border-t bg-muted/20 px-3 py-2">
+                    <MarkDiscussedButton itemId={item.id} />
+                  </div>
+                )}
               </li>
             )
           })}
