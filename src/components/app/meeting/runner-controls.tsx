@@ -2,8 +2,10 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { Check, Circle, CircleDot } from "lucide-react"
 import { toast } from "sonner"
 
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -380,6 +382,15 @@ export function RunnerControls({
             </div>
           )}
 
+          {phase.has_round && (
+            <RoundRoster
+              order={order}
+              currentIndex={idx}
+              presenting={presenting}
+              memberName={memberName}
+            />
+          )}
+
           <ConfirmDialog
             trigger={
               <Button
@@ -500,6 +511,13 @@ export function RunnerControls({
           </div>
         )}
 
+        <RoundRoster
+          order={order}
+          currentIndex={idx}
+          presenting={presenting}
+          memberName={memberName}
+        />
+
         <ConfirmDialog
           trigger={
             <Button
@@ -542,6 +560,72 @@ export function RunnerControls({
         disabled={pending}
         onConfirm={() => run(() => resetMeeting(meetingId))}
       />
+    </div>
+  )
+}
+
+/**
+ * Moderator-only checklist of who has presented this round/phase. Members never
+ * see this. Sorted alphabetically so the not-yet-revealed names don't imply an
+ * upcoming order.
+ */
+function RoundRoster({
+  order,
+  currentIndex,
+  presenting,
+  memberName,
+}: {
+  order: string[]
+  currentIndex: number
+  presenting: boolean
+  memberName: Record<string, string>
+}) {
+  if (order.length === 0) return null
+
+  const doneIds = new Set(order.slice(0, currentIndex))
+  const currentId =
+    presenting && currentIndex < order.length ? order[currentIndex] : null
+
+  const rows = order
+    .map((id) => ({
+      id,
+      name: memberName[id] ?? "Unknown",
+      status:
+        id === currentId ? "current" : doneIds.has(id) ? "done" : "todo",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return (
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Presenters · {doneIds.size} of {order.length} done
+      </p>
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-center gap-2 text-sm">
+            {r.status === "done" ? (
+              <Check className="size-4 shrink-0 text-emerald-600" />
+            ) : r.status === "current" ? (
+              <CircleDot className="size-4 shrink-0 text-foreground" />
+            ) : (
+              <Circle className="size-4 shrink-0 text-muted-foreground/40" />
+            )}
+            <span
+              className={cn(
+                r.status === "done" && "text-muted-foreground line-through",
+                r.status === "current" && "font-semibold"
+              )}
+            >
+              {r.name}
+            </span>
+            {r.status === "current" && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                up now
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
