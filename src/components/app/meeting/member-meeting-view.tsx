@@ -77,10 +77,17 @@ export function MemberMeetingView({
       : null
 
     const myIndex = activeRound.order_member_ids.indexOf(myMemberId)
+    const hasPresenterRound =
+      phase?.has_round ?? activeRound.round_type !== "exploration"
+    // Someone is only "up" once the moderator has revealed them (the round/phase
+    // sits in a "selecting" state — current_started_at null — until then).
     const isUpNow =
-      (phase?.has_round ?? activeRound.round_type !== "exploration") &&
+      hasPresenterRound &&
+      activeRound.current_started_at != null &&
       myIndex >= 0 &&
       myIndex === activeRound.current_index
+    const selecting =
+      hasPresenterRound && activeRound.current_started_at == null
 
     const label = isExploration
       ? phase?.name ?? "Exploration"
@@ -101,7 +108,7 @@ export function MemberMeetingView({
             </p>
           )}
           <p className="font-heading text-2xl font-semibold">
-            {isUpNow ? "You're up." : "Listening"}
+            {isUpNow ? "You're up." : selecting ? "Up next…" : "Listening"}
           </p>
           <div className="flex justify-center pt-2">
             <RoundTimer
@@ -117,12 +124,14 @@ export function MemberMeetingView({
           {(phase?.has_round || !isExploration) && (
             <p className="text-sm text-muted-foreground">
               {Math.min(activeRound.current_index, activeRound.order_member_ids.length)} of{" "}
-              {activeRound.order_member_ids.length} revealed.
+              {activeRound.order_member_ids.length} done.
             </p>
           )}
           {(phase?.has_round || !isExploration) && (
             <p className="text-xs text-muted-foreground">
-              Order is randomized and hidden — your turn may come at any time.
+              {selecting
+                ? "The moderator is choosing who's next."
+                : "The order is hidden — your turn may come at any time."}
             </p>
           )}
         </CardContent>

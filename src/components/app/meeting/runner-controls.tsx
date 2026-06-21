@@ -27,6 +27,7 @@ import {
   cancelActiveRound,
   closeMeeting,
   resetMeeting,
+  revealPresenter,
   startExploration,
   startMeeting,
   startRound,
@@ -211,9 +212,14 @@ export function RunnerControls({
 
       const order = activeRound.order_member_ids
       const idx = activeRound.current_index ?? 0
-      const upNow = phase.has_round && idx < order.length ? memberName[order[idx]] : null
-      const roundDone = phase.has_round && idx >= order.length
+      const presenting = activeRound.current_started_at != null
+      const upNow = phase.has_round && presenting && idx < order.length
+        ? memberName[order[idx]]
+        : null
       const isLastPhase = phaseIdx >= phases.length - 1
+      // In a has-round phase, who hasn't presented yet.
+      const selectingPool = phase.has_round ? order.slice(idx) : []
+      const remainingAfterCurrent = phase.has_round ? order.slice(idx + 1) : []
 
       return (
         <div className="space-y-4">
@@ -259,35 +265,120 @@ export function RunnerControls({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Has-round phase, nobody up yet → moderator chooses who shares first */}
+          {phase.has_round && !presenting && selectingPool.length > 0 && (
+            <PresenterPicker
+              label="Who shares first?"
+              pool={selectingPool}
+              memberName={memberName}
+              pending={pending}
+              cta={(name) => (name ? `Reveal ${name}` : "🎲 Reveal random")}
+              onReveal={(memberId) =>
+                run(() => revealPresenter({ roundId: activeRound.id, memberId }))
+              }
+            />
+          )}
+
+          {/* Has-round phase with no eligible members → let the moderator move on */}
+          {phase.has_round && !presenting && selectingPool.length === 0 && (
             <Button
-              size="sm"
-              variant="outline"
+              className="w-full"
               disabled={pending}
-              onClick={() => run(() => adjustTimer(activeRound.id, -30))}
+              onClick={() =>
+                run(() => advanceExploration({ roundId: activeRound.id }))
+              }
             >
-              −30s
+              {isLastPhase
+                ? "End exploration"
+                : `Next phase: ${phases[phaseIdx + 1]?.name}`}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => run(() => adjustTimer(activeRound.id, 30))}
-            >
-              +30s
-            </Button>
-            <Button
-              className="ml-auto"
-              disabled={pending}
-              onClick={() => run(() => advanceExploration(activeRound.id))}
-            >
-              {phase.has_round && !roundDone
-                ? "✓ Done · Reveal next 🎲"
-                : isLastPhase
+          )}
+
+          {/* Has-round phase, someone presenting → done + reveal next */}
+          {phase.has_round && presenting && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => run(() => adjustTimer(activeRound.id, -30))}
+                >
+                  −30s
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => run(() => adjustTimer(activeRound.id, 30))}
+                >
+                  +30s
+                </Button>
+              </div>
+              {remainingAfterCurrent.length > 0 ? (
+                <PresenterPicker
+                  key={`xnext-${phaseIdx}-${idx}`}
+                  label="Who's next?"
+                  pool={remainingAfterCurrent}
+                  memberName={memberName}
+                  pending={pending}
+                  cta={(name) =>
+                    name ? `✓ Done · reveal ${name}` : "✓ Done · reveal random"
+                  }
+                  onReveal={(nextMemberId) =>
+                    run(() =>
+                      advanceExploration({ roundId: activeRound.id, nextMemberId })
+                    )
+                  }
+                />
+              ) : (
+                <Button
+                  className="w-full"
+                  disabled={pending}
+                  onClick={() =>
+                    run(() => advanceExploration({ roundId: activeRound.id }))
+                  }
+                >
+                  {isLastPhase
+                    ? "✓ Done · End exploration"
+                    : `✓ Done · Next phase: ${phases[phaseIdx + 1]?.name}`}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* Non-round phase → just advance to the next phase / end */}
+          {!phase.has_round && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => run(() => adjustTimer(activeRound.id, -30))}
+              >
+                −30s
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => run(() => adjustTimer(activeRound.id, 30))}
+              >
+                +30s
+              </Button>
+              <Button
+                className="ml-auto"
+                disabled={pending}
+                onClick={() =>
+                  run(() => advanceExploration({ roundId: activeRound.id }))
+                }
+              >
+                {isLastPhase
                   ? "End exploration"
                   : `Next phase: ${phases[phaseIdx + 1]?.name}`}
-            </Button>
-          </div>
+              </Button>
+            </div>
+          )}
 
           <ConfirmDialog
             trigger={
@@ -312,15 +403,18 @@ export function RunnerControls({
     // Plain round (updates / commitments / lightning / brainstorm) in progress
     const order = activeRound.order_member_ids
     const idx = activeRound.current_index ?? 0
-    const upNow = idx < order.length ? memberName[order[idx]] ?? "—" : null
+    const presenting = activeRound.current_started_at != null
     const done = idx >= order.length
+    const upNow = presenting && idx < order.length ? memberName[order[idx]] ?? "—" : null
+    const selectingPool = order.slice(idx) // not yet presented
+    const remainingAfterCurrent = order.slice(idx + 1)
 
     return (
       <div className="space-y-4">
         <div className="rounded-2xl border bg-card p-6 text-center">
           {done ? (
             <p className="font-heading text-xl">Round complete.</p>
-          ) : (
+          ) : presenting ? (
             <div className="space-y-4">
               <div>
                 <p className="text-xs uppercase tracking-wide text-muted-foreground">
@@ -334,45 +428,77 @@ export function RunnerControls({
                 size="lg"
               />
             </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Choose who goes {idx === 0 ? "first" : "next"} — or hit Random.
+            </p>
           )}
         </div>
 
-        {!done && (
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => run(() => adjustTimer(activeRound.id, -30))}
-            >
-              −30s
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={pending}
-              onClick={() => run(() => adjustTimer(activeRound.id, 30))}
-            >
-              +30s
-            </Button>
-            <span className="ml-2 text-xs text-muted-foreground">
-              per-member: {activeRound.per_member_seconds}s
-            </span>
-          </div>
+        {/* Selecting state — nobody up yet */}
+        {!done && !presenting && (
+          <PresenterPicker
+            label={idx === 0 ? "Who presents first?" : "Who's next?"}
+            pool={selectingPool}
+            memberName={memberName}
+            pending={pending}
+            cta={(name) => (name ? `Reveal ${name}` : "🎲 Reveal random")}
+            onReveal={(memberId) =>
+              run(() => revealPresenter({ roundId: activeRound.id, memberId }))
+            }
+          />
         )}
 
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">
-            {Math.min(idx, order.length)} of {order.length} revealed
-          </span>
-          <Button
-            className="ml-auto"
-            disabled={pending || done}
-            onClick={() => run(() => advanceRound(activeRound.id))}
-          >
-            {done ? "Finished" : `✓ Done · Reveal next 🎲`}
-          </Button>
-        </div>
+        {/* Presenting state — timer controls + done/reveal-next */}
+        {!done && presenting && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => run(() => adjustTimer(activeRound.id, -30))}
+              >
+                −30s
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => run(() => adjustTimer(activeRound.id, 30))}
+              >
+                +30s
+              </Button>
+              <span className="ml-auto text-xs text-muted-foreground">
+                {Math.min(idx, order.length)} of {order.length} done
+              </span>
+            </div>
+
+            {remainingAfterCurrent.length > 0 ? (
+              <PresenterPicker
+                key={`next-${idx}`}
+                label="Who's next?"
+                pool={remainingAfterCurrent}
+                memberName={memberName}
+                pending={pending}
+                cta={(name) =>
+                  name ? `✓ Done · reveal ${name}` : "✓ Done · reveal random"
+                }
+                onReveal={(nextMemberId) =>
+                  run(() => advanceRound({ roundId: activeRound.id, nextMemberId }))
+                }
+              />
+            ) : (
+              <Button
+                className="w-full"
+                disabled={pending}
+                onClick={() => run(() => advanceRound({ roundId: activeRound.id }))}
+              >
+                ✓ Done · End round
+              </Button>
+            )}
+          </div>
+        )}
 
         <ConfirmDialog
           trigger={
@@ -385,7 +511,7 @@ export function RunnerControls({
             </Button>
           }
           title="Cancel this round?"
-          description="Ends the current round immediately. You'll return to the meeting lobby and can start a fresh round — the random order will be regenerated."
+          description="Ends the current round immediately. You'll return to the meeting lobby and can start a fresh round."
           confirmLabel="Yes, cancel round"
           disabled={pending}
           onConfirm={() => run(() => cancelActiveRound(meetingId))}
@@ -416,6 +542,59 @@ export function RunnerControls({
         disabled={pending}
         onConfirm={() => run(() => resetMeeting(meetingId))}
       />
+    </div>
+  )
+}
+
+function PresenterPicker({
+  label,
+  pool,
+  memberName,
+  pending,
+  cta,
+  onReveal,
+}: {
+  label: string
+  pool: string[]
+  memberName: Record<string, string>
+  pending: boolean
+  cta: (selectedName: string | null) => string
+  onReveal: (memberId: string | null) => void
+}) {
+  // "" = Random (let the server pick from the remaining pool).
+  const [selected, setSelected] = useState<string>("")
+
+  const choices = pool
+    .map((id) => ({ id, name: memberName[id] ?? "Unknown" }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const selectedName = selected ? memberName[selected] ?? null : null
+
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+      <p className="text-sm font-medium">{label}</p>
+      <Select value={selected} onValueChange={(v) => setSelected(v ?? "")}>
+        <SelectTrigger className="w-full">
+          <span data-slot="select-value">
+            {selected ? selectedName : "🎲 Random"}
+          </span>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">🎲 Random</SelectItem>
+          {choices.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        className="w-full"
+        disabled={pending || pool.length === 0}
+        onClick={() => onReveal(selected || null)}
+      >
+        {cta(selectedName)}
+      </Button>
     </div>
   )
 }

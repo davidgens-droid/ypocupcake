@@ -118,7 +118,7 @@ export default async function RunMeetingPage({
           {activeRound.exploration_format && (
             <> · {formatLabel.get(activeRound.exploration_format) ?? activeRound.exploration_format}</>
           )}
-          {" "}· order is hidden until each reveal.
+          {" "}· you choose who&apos;s next; members only ever see their own turn.
         </p>
       )}
     </div>

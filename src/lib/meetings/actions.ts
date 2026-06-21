@@ -37,6 +37,29 @@ function shuffle<T>(arr: T[]): T[] {
   return copy
 }
 
+/**
+ * Choose who fills `slot` from the not-yet-presented pool (positions
+ * slot..end of `order`). If `memberId` is given and still in the pool, honor
+ * the moderator's pick; otherwise pick randomly.
+ */
+function pickForSlot(
+  order: string[],
+  slot: number,
+  memberId: string | null
+): string | null {
+  const pool = order.slice(slot)
+  if (pool.length === 0) return null
+  if (memberId && pool.includes(memberId)) return memberId
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+/** Move `memberId` to position `slot` (searching only the unrevealed tail). */
+function swapToSlot(order: string[], slot: number, memberId: string) {
+  const j = order.indexOf(memberId, slot)
+  if (j === -1) return
+  ;[order[slot], order[j]] = [order[j], order[slot]]
+}
+
 export async function startMeeting(meetingId: string) {
   const { supabase } = await ensureMod()
   const { error } = await supabase
@@ -98,7 +121,10 @@ export async function startRound(input: z.infer<typeof startRoundSchema>) {
       order_member_ids: order,
       current_index: 0,
       started_at: now,
-      current_started_at: order.length > 0 ? now : null,
+      // Start in "selecting" state (no one up yet) so the moderator chooses
+      // who presents first — or hits Random. current_started_at stays null
+      // until the first reveal.
+      current_started_at: null,
       per_member_seconds: perMemberSeconds,
     })
     .select("id")
@@ -110,29 +136,95 @@ export async function startRound(input: z.infer<typeof startRoundSchema>) {
   return { roundId: data.id as string }
 }
 
-export async function advanceRound(roundId: string) {
+const revealSchema = z.object({
+  roundId: z.string().uuid(),
+  memberId: z.string().uuid().nullable().optional(),
+})
+
+/**
+ * Reveal the presenter for the *current* slot (used for the first presenter of
+ * a round or a has-round exploration phase, while in the "selecting" state).
+ * Honors the moderator's pick or chooses randomly. No-op if someone is already
+ * up.
+ */
+export async function revealPresenter(input: z.infer<typeof revealSchema>) {
   const { supabase } = await ensureMod()
+  const parsed = revealSchema.parse(input)
+
+  const { data: round, error } = await supabase
+    .from("meeting_rounds")
+    .select(
+      "id, meeting_id, order_member_ids, current_index, current_started_at, ended_at"
+    )
+    .eq("id", parsed.roundId)
+    .single()
+  if (error || !round) throw new Error("Round not found.")
+  if (round.ended_at) throw new Error("Round already ended.")
+  if (round.current_started_at) return // someone is already up
+
+  const order = [...(round.order_member_ids ?? [])]
+  const slot = round.current_index ?? 0
+  const chosen = pickForSlot(order, slot, parsed.memberId ?? null)
+  if (!chosen) return
+  swapToSlot(order, slot, chosen)
+
+  const { error: updErr } = await supabase
+    .from("meeting_rounds")
+    .update({
+      order_member_ids: order,
+      current_started_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.roundId)
+  if (updErr) throw new Error(updErr.message)
+
+  revalidatePath(`/meeting/${round.meeting_id}`)
+  revalidatePath(`/meeting/${round.meeting_id}/run`)
+}
+
+const advanceRoundSchema = z.object({
+  roundId: z.string().uuid(),
+  nextMemberId: z.string().uuid().nullable().optional(),
+})
+
+/**
+ * Finish the current presenter and reveal the next one (moderator's pick, or
+ * random) in a single step. Ends the round when no one is left.
+ */
+export async function advanceRound(input: z.infer<typeof advanceRoundSchema>) {
+  const { supabase } = await ensureMod()
+  const parsed = advanceRoundSchema.parse(input)
 
   const { data: round, error: fetchErr } = await supabase
     .from("meeting_rounds")
     .select("id, meeting_id, current_index, order_member_ids, ended_at")
-    .eq("id", roundId)
+    .eq("id", parsed.roundId)
     .single()
   if (fetchErr) throw new Error(fetchErr.message)
 
+  const order = [...(round.order_member_ids ?? [])]
   const nextIndex = (round.current_index ?? 0) + 1
-  const finished = nextIndex >= (round.order_member_ids?.length ?? 0)
   const now = new Date().toISOString()
 
-  const { error } = await supabase
-    .from("meeting_rounds")
-    .update({
-      current_index: nextIndex,
-      current_started_at: finished ? null : now,
-      ended_at: finished ? now : null,
-    })
-    .eq("id", roundId)
-  if (error) throw new Error(error.message)
+  if (nextIndex >= order.length) {
+    // No one left — end the round.
+    const { error } = await supabase
+      .from("meeting_rounds")
+      .update({ current_index: nextIndex, current_started_at: null, ended_at: now })
+      .eq("id", parsed.roundId)
+    if (error) throw new Error(error.message)
+  } else {
+    const chosen = pickForSlot(order, nextIndex, parsed.nextMemberId ?? null)
+    if (chosen) swapToSlot(order, nextIndex, chosen)
+    const { error } = await supabase
+      .from("meeting_rounds")
+      .update({
+        order_member_ids: order,
+        current_index: nextIndex,
+        current_started_at: now,
+      })
+      .eq("id", parsed.roundId)
+    if (error) throw new Error(error.message)
+  }
 
   revalidatePath(`/meeting/${round.meeting_id}`)
   revalidatePath(`/meeting/${round.meeting_id}/run`)
@@ -293,7 +385,9 @@ export async function startExploration(input: {
       phase_started_at: now,
       order_member_ids: phase0Order,
       current_index: 0,
-      current_started_at: phase0.has_round ? now : null,
+      // has-round phases begin in "selecting" state (moderator picks who's
+      // first, or Random); non-round phases never have a presenter.
+      current_started_at: null,
       per_member_seconds: phase0.default_seconds,
       started_at: now,
     })
@@ -306,13 +400,21 @@ export async function startExploration(input: {
   return { roundId: round.id as string }
 }
 
-export async function advanceExploration(roundId: string) {
+const advanceExplorationSchema = z.object({
+  roundId: z.string().uuid(),
+  nextMemberId: z.string().uuid().nullable().optional(),
+})
+
+export async function advanceExploration(
+  input: z.infer<typeof advanceExplorationSchema>
+) {
   const { supabase } = await ensureMod()
+  const { roundId, nextMemberId } = advanceExplorationSchema.parse(input)
 
   const { data: round, error: fetchErr } = await supabase
     .from("meeting_rounds")
     .select(
-      "id, meeting_id, exploration_format, parking_lot_item_id, phase_index, current_index, order_member_ids"
+      "id, meeting_id, exploration_format, parking_lot_item_id, phase_index, current_index, current_started_at, order_member_ids"
     )
     .eq("id", roundId)
     .single()
@@ -328,14 +430,23 @@ export async function advanceExploration(roundId: string) {
   const now = new Date().toISOString()
 
   // If the current phase has a round and there are more members to reveal,
-  // just advance current_index.
+  // reveal the next one (moderator's pick or random) in place.
   if (currentPhase.has_round) {
-    const total = round.order_member_ids?.length ?? 0
-    const next = (round.current_index ?? 0) + 1
-    if (next < total) {
+    const order = [...(round.order_member_ids ?? [])]
+    const presenting = !!round.current_started_at
+    // While presenting, fill the next slot; if somehow called before the first
+    // reveal, fill the current slot instead.
+    const slot = presenting ? (round.current_index ?? 0) + 1 : round.current_index ?? 0
+    if (slot < order.length) {
+      const chosen = pickForSlot(order, slot, nextMemberId ?? null)
+      if (chosen) swapToSlot(order, slot, chosen)
       const { error } = await supabase
         .from("meeting_rounds")
-        .update({ current_index: next, current_started_at: now })
+        .update({
+          order_member_ids: order,
+          current_index: slot,
+          current_started_at: now,
+        })
         .eq("id", roundId)
       if (error) throw new Error(error.message)
       revalidatePath(`/meeting/${round.meeting_id}/run`)
@@ -354,7 +465,6 @@ export async function advanceExploration(roundId: string) {
   const nextPhase = phases[nextPhaseIndex]
   // Build the next phase's order if it has a round.
   let nextOrder: string[] = []
-  let nextCurrentStartedAt: string | null = null
   if (nextPhase.has_round) {
     const { data: item } = await supabase
       .from("parking_lot_items")
@@ -378,7 +488,6 @@ export async function advanceExploration(roundId: string) {
       true,
       nextPhase.excludes_presenter ?? false
     )
-    nextCurrentStartedAt = now
   }
 
   const { error: updErr } = await supabase
@@ -388,7 +497,9 @@ export async function advanceExploration(roundId: string) {
       phase_started_at: now,
       order_member_ids: nextOrder,
       current_index: 0,
-      current_started_at: nextCurrentStartedAt,
+      // has-round phases start in "selecting" state; non-round phases have no
+      // presenter. Either way, no one is auto-revealed.
+      current_started_at: null,
       per_member_seconds: nextPhase.default_seconds,
     })
     .eq("id", roundId)
