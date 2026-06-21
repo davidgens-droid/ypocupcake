@@ -81,6 +81,11 @@ export async function generateUpdateFromBrainDump(input: {
 
   const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
+    // Retry transient overloads (429/529) and connection blips with backoff.
+    maxRetries: 3,
+    // Fail just under the 60s function budget so we can surface a clean error
+    // instead of being killed mid-call by the platform.
+    timeout: 55_000,
   })
 
   const systemPrompt = `You are an empathic assistant helping a YPO forum member structure a brain-dump into a YPO 5% Reflection update.
@@ -108,7 +113,10 @@ Now structure this into the YPO update fields.`
   try {
     const response = await client.messages.create({
       model: "claude-opus-4-7",
-      max_tokens: 8192,
+      // Adaptive thinking shares this budget with the JSON answer. 8192 was
+      // tight: a long dump could let thinking crowd out the output, truncating
+      // the JSON and breaking the parse. 16384 gives both room to breathe.
+      max_tokens: 16384,
       thinking: { type: "adaptive" },
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -162,10 +170,29 @@ Now structure this into the YPO update fields.`
       },
     })
 
-    // First text block is the JSON payload.
+    // If the model hit the token ceiling, the JSON answer is truncated and
+    // JSON.parse below would throw a cryptic error. Catch it explicitly.
+    if (response.stop_reason === "max_tokens") {
+      console.warn("[brain-dump] response truncated at max_tokens", {
+        member: me.id,
+        usage: response.usage,
+      })
+      return {
+        ok: false,
+        error:
+          "That was a lot to process and the response got cut off. Try again, or break it into a slightly shorter dump.",
+      }
+    }
+
+    // First text block is the JSON payload (thinking blocks are skipped).
     const textBlock = response.content.find((b) => b.type === "text")
     if (!textBlock || textBlock.type !== "text") {
-      return { ok: false, error: "No structured response from AI." }
+      console.warn("[brain-dump] no text block in response", {
+        member: me.id,
+        stop_reason: response.stop_reason,
+        block_types: response.content.map((b) => b.type),
+      })
+      return { ok: false, error: "No structured response from AI. Please try again." }
     }
 
     const parsed = aiUpdateSchema.parse(JSON.parse(textBlock.text))
@@ -180,10 +207,55 @@ Now structure this into the YPO update fields.`
 
     return { ok: true, content: toUpdateContent(parsed) }
   } catch (err) {
+    // Log the real cause to the server (visible in Vercel logs) so any future
+    // failure is diagnosable instead of a mystery. Order matters: timeout and
+    // connection errors are subclasses of APIError, so check them first.
+    if (err instanceof Anthropic.APIConnectionTimeoutError) {
+      console.error("[brain-dump] timeout", { member: me.id, message: err.message })
+      return {
+        ok: false,
+        error: "That took too long to process. Try again, or shorten your dump a little.",
+      }
+    }
+    if (err instanceof Anthropic.APIConnectionError) {
+      console.error("[brain-dump] connection error", { member: me.id, message: err.message })
+      return {
+        ok: false,
+        error: "Couldn't reach the AI. Check your connection and try again.",
+      }
+    }
     if (err instanceof Anthropic.APIError) {
+      console.error("[brain-dump] Anthropic APIError", {
+        member: me.id,
+        status: err.status,
+        name: err.name,
+        message: err.message,
+      })
+      // 429 = rate limited, 529 = overloaded, 5xx = transient server-side.
+      if (err.status === 429 || err.status === 529) {
+        return {
+          ok: false,
+          error: "The AI is busy right now. Give it a few seconds and try again.",
+        }
+      }
+      if (typeof err.status === "number" && err.status >= 500) {
+        return {
+          ok: false,
+          error: "The AI had a hiccup on its end. Please try again.",
+        }
+      }
       return { ok: false, error: err.message }
     }
-    return { ok: false, error: err instanceof Error ? err.message : "AI call failed." }
+    // Anything else — most likely a JSON.parse or Zod failure on the payload.
+    console.error("[brain-dump] non-API error", {
+      member: me.id,
+      name: err instanceof Error ? err.name : typeof err,
+      message: err instanceof Error ? err.message : String(err),
+    })
+    return {
+      ok: false,
+      error: "Something went wrong structuring your update. Please try again.",
+    }
   }
 }
 
