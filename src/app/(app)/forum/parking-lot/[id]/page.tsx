@@ -22,6 +22,7 @@ import {
   withdrawParkingLotItem,
 } from "@/lib/parking-lot/actions"
 import { ScheduleControl } from "@/components/app/parking-lot/schedule-control"
+import { MarkDiscussedButton } from "@/components/app/parking-lot/mark-discussed-button"
 import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
@@ -60,7 +61,10 @@ export default async function ParkingLotItemPage({
       .from("meetings")
       .select("id, scheduled_at, location, status")
       .or(`status.eq.upcoming,status.eq.in_progress`)
-      .gte("scheduled_at", new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString())
+      .gte(
+        "scheduled_at",
+        new Date(new Date().getTime() - 1000 * 60 * 60 * 24).toISOString()
+      )
       .order("scheduled_at", { ascending: true }),
   ])
 
@@ -231,6 +235,10 @@ export default async function ParkingLotItemPage({
             Edit
           </Button>
         )}
+        {isPrivileged &&
+          (item.status === "parked" || item.status === "scheduled") && (
+            <MarkDiscussedButton itemId={item.id} />
+          )}
         {isEditable && (
           <form action={withdraw}>
             <Button size="sm" variant="outline" type="submit">

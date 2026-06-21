@@ -156,6 +156,50 @@ export async function unscheduleParkingLotItem(itemId: string) {
   if (prevMeetingId) revalidatePath(`/meeting/${prevMeetingId}/run`)
 }
 
+// ─── Mark discussed (admin / moderator / asst-moderator / czar) ────────────
+const markDiscussedSchema = z.object({
+  itemId: z.string().uuid(),
+  takeaways: z.string().trim().max(2000).optional().default(""),
+})
+
+/**
+ * Mark a parking-lot item as discussed/presented without running it through a
+ * scheduled meeting — e.g. the topic came up organically in conversation.
+ * Permission is enforced by the parking_lot_privileged_manage RLS policy
+ * (czar / moderator / assistant_moderator / admin).
+ */
+export async function markParkingLotItemDiscussed(
+  input: z.infer<typeof markDiscussedSchema>
+) {
+  await requireCurrentMember()
+  const parsed = markDiscussedSchema.parse(input)
+  const supabase = await createClient()
+
+  // If it was scheduled into a meeting, free that link too.
+  const { data: existing } = await supabase
+    .from("parking_lot_items")
+    .select("scheduled_meeting_id")
+    .eq("id", parsed.itemId)
+    .single()
+  const prevMeetingId = existing?.scheduled_meeting_id ?? null
+
+  const takeaways = parsed.takeaways.trim()
+  const { error } = await supabase
+    .from("parking_lot_items")
+    .update({
+      status: "presented",
+      presented_at: new Date().toISOString(),
+      scheduled_meeting_id: null,
+      ...(takeaways ? { takeaways } : {}),
+    })
+    .eq("id", parsed.itemId)
+  if (error) throw new Error(error.message)
+
+  revalidatePath("/forum/parking-lot")
+  revalidatePath(`/forum/parking-lot/${parsed.itemId}`)
+  if (prevMeetingId) revalidatePath(`/meeting/${prevMeetingId}/run`)
+}
+
 export async function withdrawParkingLotItem(id: string) {
   const me = await requireCurrentMember()
   const supabase = await createClient()
