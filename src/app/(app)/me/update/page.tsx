@@ -17,8 +17,9 @@ import type { ExplorationFormat } from "@/lib/types/domain"
 // adaptive thinking, which can take 20–60s on a long dump. Without this, the
 // action runs under Vercel's short default function timeout and gets killed
 // mid-call — the cause of the intermittent failures. Server Actions inherit
-// maxDuration from the page they're invoked on.
-export const maxDuration = 60
+// maxDuration from the page they're invoked on. 120s (Vercel Pro allows up to
+// 300) gives generous headroom; you're only billed for real execution time.
+export const maxDuration = 120
 
 export default async function UpdatePage() {
   const me = await requireCurrentMember()

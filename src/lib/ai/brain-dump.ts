@@ -83,9 +83,10 @@ export async function generateUpdateFromBrainDump(input: {
     apiKey: process.env.ANTHROPIC_API_KEY,
     // Retry transient overloads (429/529) and connection blips with backoff.
     maxRetries: 3,
-    // Fail just under the 60s function budget so we can surface a clean error
-    // instead of being killed mid-call by the platform.
-    timeout: 55_000,
+    // Per-attempt ceiling, kept just under the page's 120s function budget so a
+    // genuinely-hung call surfaces a clean error instead of being killed by the
+    // platform — but high enough that a legitimately long dump still completes.
+    timeout: 110_000,
   })
 
   const systemPrompt = `You are an empathic assistant helping a YPO forum member structure a brain-dump into a YPO 5% Reflection update.
