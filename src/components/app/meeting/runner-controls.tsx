@@ -275,6 +275,7 @@ export function RunnerControls({
                 }
                 perMemberSeconds={activeRound.per_member_seconds}
                 size="lg"
+                beep={phase.has_round}
               />
             </div>
 
@@ -462,6 +463,7 @@ export function RunnerControls({
                 startedAt={activeRound.current_started_at}
                 perMemberSeconds={activeRound.per_member_seconds}
                 size="lg"
+                beep
               />
             </div>
           ) : (
