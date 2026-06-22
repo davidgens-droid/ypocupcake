@@ -12,12 +12,11 @@ import { createClient } from "@/lib/supabase/client"
 const ERROR_MESSAGES: Record<string, string> = {
   not_invited:
     "That email isn't on the Cupcake invite list. Ask an admin to add you.",
-  missing_code: "The sign-in link was malformed. Try again.",
+  missing_code: "That sign-in attempt was malformed. Request a fresh code.",
   no_user: "Sign-in completed but no user was returned. Try again.",
   otp_expired:
-    "Magic link was already used (often pre-clicked by your email's malware scanner). Use the 6-digit code instead.",
-  access_denied:
-    "Supabase declined the link. Request a new one and use the 6-digit code.",
+    "That code expired or was already used. Request a fresh one.",
+  access_denied: "Sign-in was declined. Request a fresh code and try again.",
 }
 
 function LoginPageInner() {
@@ -40,12 +39,10 @@ function LoginPageInner() {
     e.preventDefault()
     setPending(true)
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
+    // Code-only sign-in: no emailRedirectTo, so we rely on the 6-digit code in
+    // the email (corporate mail scanners pre-click magic links and consume them;
+    // they don't type codes). The email template must present {{ .Token }}.
+    const { error } = await supabase.auth.signInWithOtp({ email })
     setPending(false)
 
     if (error) {
@@ -126,8 +123,8 @@ function LoginPageInner() {
               {pending ? "Sending…" : "Send sign-in code"}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Cupcake is invite-only. The email contains a sign-in code and a
-              magic link — either works.
+              Cupcake is invite-only. We&apos;ll email you a 6-digit sign-in
+              code.
             </p>
           </form>
         )}
@@ -137,8 +134,8 @@ function LoginPageInner() {
             <div className="rounded-lg border bg-muted/50 p-4 text-sm">
               <p className="font-medium">Code sent to {email}</p>
               <p className="mt-1 text-muted-foreground">
-                Enter the code from the email below, or click the link in the
-                email.
+                Enter the 6-digit code from the email below. (Tip: type it in —
+                don&apos;t forward the email.)
               </p>
             </div>
             <div className="space-y-2">
