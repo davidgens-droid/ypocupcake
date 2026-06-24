@@ -87,21 +87,11 @@ export async function startRound(input: z.infer<typeof startRoundSchema>) {
   const { supabase } = await ensureMod()
   const parsed = startRoundSchema.parse(input)
 
-  // Pull attending members for this meeting; default to all members if no
-  // attendance rows yet.
-  const { data: attendees } = await supabase
-    .from("attendees")
-    .select("member_id, attending")
-    .eq("meeting_id", parsed.meetingId)
-
-  let memberIds = (attendees ?? [])
-    .filter((a) => a.attending)
-    .map((a) => a.member_id)
-
-  if (memberIds.length === 0) {
-    const { data: all } = await supabase.from("members").select("id")
-    memberIds = (all ?? []).map((m) => m.id)
-  }
+  // Everyone in the forum is assumed to present — the round is no longer gated
+  // on attendance / "marked ready". The moderator chooses who actually goes
+  // (and can simply not call on anyone who's absent).
+  const { data: all } = await supabase.from("members").select("id")
+  const memberIds = (all ?? []).map((m) => m.id)
 
   const order = shuffle(memberIds)
   const now = new Date().toISOString()
@@ -346,18 +336,9 @@ export async function startExploration(input: {
     throw new Error(`Unknown exploration format: ${format}`)
   }
 
-  // Pull attending members
-  const { data: attendees } = await supabase
-    .from("attendees")
-    .select("member_id, attending")
-    .eq("meeting_id", input.meetingId)
-  let memberIds = (attendees ?? [])
-    .filter((a) => a.attending)
-    .map((a) => a.member_id)
-  if (memberIds.length === 0) {
-    const { data: all } = await supabase.from("members").select("id")
-    memberIds = (all ?? []).map((m) => m.id)
-  }
+  // All forum members participate (assumed present, regardless of "ready").
+  const { data: all } = await supabase.from("members").select("id")
+  const memberIds = (all ?? []).map((m) => m.id)
 
   const phase0 = phases[0]
   const phase0Order = computeRoundOrder(
@@ -471,17 +452,8 @@ export async function advanceExploration(
       .select("submitter_member_id")
       .eq("id", round.parking_lot_item_id ?? "")
       .maybeSingle()
-    const { data: attendees } = await supabase
-      .from("attendees")
-      .select("member_id, attending")
-      .eq("meeting_id", round.meeting_id)
-    let memberIds = (attendees ?? [])
-      .filter((a) => a.attending)
-      .map((a) => a.member_id)
-    if (memberIds.length === 0) {
-      const { data: all } = await supabase.from("members").select("id")
-      memberIds = (all ?? []).map((m) => m.id)
-    }
+    const { data: all } = await supabase.from("members").select("id")
+    const memberIds = (all ?? []).map((m) => m.id)
     nextOrder = computeRoundOrder(
       memberIds,
       item?.submitter_member_id ?? null,
