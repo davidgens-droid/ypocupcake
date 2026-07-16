@@ -12,11 +12,22 @@ const ITEMS = [
   { href: "/forum/members", label: "Members", match: /^\/forum\/members/ },
 ]
 
-export function ForumSubNav() {
+const QOL_ITEM = {
+  href: "/forum/qol-history",
+  label: "QOL History",
+  match: /^\/forum\/qol-history/,
+}
+
+export function ForumSubNav({
+  showQolHistory = false,
+}: {
+  showQolHistory?: boolean
+}) {
   const pathname = usePathname()
+  const items = showQolHistory ? [...ITEMS, QOL_ITEM] : ITEMS
   return (
     <nav className="flex gap-1 overflow-x-auto rounded-lg border bg-background p-1 text-sm">
-      {ITEMS.map((item) => {
+      {items.map((item) => {
         const active = item.match.test(pathname)
         return (
           <Link

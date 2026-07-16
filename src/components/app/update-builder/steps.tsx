@@ -54,7 +54,10 @@ export function StepIntro() {
       </ul>
       <Card className="bg-muted/40">
         <CardContent className="py-3 text-sm text-muted-foreground">
-          This update is private to you. Only you can see what you write.
+          This update is private to you — only you can see what you write. The
+          one exception: your Quality of Life numbers are shared with forum
+          leadership (moderator, assistant moderator, technology) in QOL
+          History.
         </CardContent>
       </Card>
     </div>
@@ -86,6 +89,11 @@ export function StepQoL({ value, history = [], onChange }: QoLProps) {
         </h2>
         <p className="text-sm text-muted-foreground">
           1 = struggling · 10 = thriving
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Note: these four numbers — and only these — are visible to forum
+          leadership (moderator, assistant moderator, technology) in QOL
+          History. The rest of your update stays private to you.
         </p>
       </div>
       <div className="space-y-6">

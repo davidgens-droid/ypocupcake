@@ -60,7 +60,8 @@ export default async function PastUpdatesPage() {
       <div>
         <h1 className="font-heading text-2xl font-semibold">Past updates</h1>
         <p className="text-sm text-muted-foreground">
-          Every update you&apos;ve prepped. Private to you.
+          Every update you&apos;ve prepped. Private to you — except your Quality
+          of Life numbers, which forum leadership can see in QOL History.
         </p>
       </div>
 

@@ -186,7 +186,8 @@ export default async function PastUpdatePage({
       </section>
 
       <p className="pt-4 text-xs text-muted-foreground">
-        Private to you. Last edited{" "}
+        Private to you — except your Quality of Life numbers, which forum
+        leadership can see in QOL History. Last edited{" "}
         {format(parseISO(update.updated_at), "MMM d, yyyy 'at' h:mm a")}.
       </p>
     </div>
