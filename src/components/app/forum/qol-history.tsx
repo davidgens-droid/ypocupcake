@@ -11,6 +11,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { formatMeeting } from "@/lib/dates"
+import { buildXlsx } from "@/lib/xlsx"
 
 export type QolRow = {
   member_id: string
@@ -38,10 +39,6 @@ const TIMEFRAMES: { value: string; label: string; months: number | null }[] = [
   { value: "6", label: "Past 6 months", months: 6 },
   { value: "3", label: "Past 3 months", months: 3 },
 ]
-
-function csvEscape(v: string): string {
-  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
-}
 
 export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
   const [timeframe, setTimeframe] = useState("12")
@@ -79,29 +76,26 @@ export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
     return { members, meetings, lookup }
   }, [rows, timeframe, nowMs])
 
-  function exportCsv() {
+  function exportXlsx() {
     const dateHeaders = meetings.map((m) =>
       formatMeeting(m.scheduled_at, "d-MMM-yyyy")
     )
-    const lines: string[] = []
-    lines.push(["Name", ...dateHeaders].map(csvEscape).join(","))
+    const grid: (string | number | null)[][] = []
+    grid.push(["Name", ...dateHeaders])
     for (const member of members) {
-      lines.push(csvEscape(member.name)) // member name on its own row
+      grid.push([member.name]) // member name on its own row
       for (const metric of METRICS) {
-        const cells = meetings.map((mt) => {
-          const v = lookup.get(`${member.id}|${mt.id}`)?.[metric.key]
-          return v == null ? "" : String(v)
-        })
-        lines.push([metric.label, ...cells].map(csvEscape).join(","))
+        const cells = meetings.map(
+          (mt) => lookup.get(`${member.id}|${mt.id}`)?.[metric.key] ?? null
+        )
+        grid.push([metric.label, ...cells])
       }
     }
-    const blob = new Blob([lines.join("\n")], {
-      type: "text/csv;charset=utf-8;",
-    })
+    const blob = buildXlsx(grid, "QOL History")
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `qol-history-${timeframe === "all" ? "all-time" : timeframe + "mo"}.csv`
+    a.download = `qol-history-${timeframe === "all" ? "all-time" : timeframe + "mo"}.xlsx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -129,7 +123,7 @@ export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
           variant="outline"
           size="sm"
           className="gap-1.5"
-          onClick={exportCsv}
+          onClick={exportXlsx}
           disabled={meetings.length === 0}
         >
           <Download className="size-4" /> Export to Excel
