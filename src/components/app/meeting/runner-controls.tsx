@@ -28,6 +28,10 @@ import {
   type FormatOption,
 } from "@/components/app/meeting/capture-topic-button"
 import {
+  QuickJotPanel,
+  type FailedJot,
+} from "@/components/app/meeting/quick-jot-input"
+import {
   advanceExploration,
   advanceRound,
   adjustTimer,
@@ -90,6 +94,10 @@ export function RunnerControls({
     parkingLotChoices[0]?.id ?? ""
   )
   useMeetingRealtime(meetingId)
+  // Quick-jot notes whose save failed. Held here (not in the per-presenter
+  // input) so they survive presenter changes and round/phase moves, and can be
+  // retried against the presenter they were jotted for.
+  const [failedJots, setFailedJots] = useState<FailedJot[]>([])
 
   function run<T>(work: () => Promise<T>) {
     startTransition(async () => {
@@ -324,12 +332,23 @@ export function RunnerControls({
           {phase.has_round && presenting && (
             <div className="space-y-2">
               {upNow && order[idx] && (
-                <CaptureTopicButton
-                  meetingId={meetingId}
-                  presenterMemberId={order[idx]}
-                  presenterName={upNow}
-                  formats={formats}
-                />
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-2">
+                  {/* Zero-click capture: type, Enter, parked for the presenter. */}
+                  <QuickJotPanel
+                    meetingId={meetingId}
+                    presenterMemberId={order[idx]}
+                    presenterName={upNow}
+                    failed={failedJots}
+                    setFailed={setFailedJots}
+                  />
+                  {/* Full form (context + exploration type) still available. */}
+                  <CaptureTopicButton
+                    meetingId={meetingId}
+                    presenterMemberId={order[idx]}
+                    presenterName={upNow}
+                    formats={formats}
+                  />
+                </div>
               )}
               <div className="flex items-center gap-2">
                 <Button
@@ -497,12 +516,23 @@ export function RunnerControls({
         {!done && presenting && (
           <div className="space-y-3">
             {upNow && order[idx] && (
-              <CaptureTopicButton
-                meetingId={meetingId}
-                presenterMemberId={order[idx]}
-                presenterName={upNow}
-                formats={formats}
-              />
+              <div className="space-y-2 rounded-lg border bg-muted/30 p-2">
+                {/* Zero-click capture: type, Enter, parked for the presenter. */}
+                <QuickJotPanel
+                  meetingId={meetingId}
+                  presenterMemberId={order[idx]}
+                  presenterName={upNow}
+                  failed={failedJots}
+                  setFailed={setFailedJots}
+                />
+                {/* Full form (context + exploration type) still available. */}
+                <CaptureTopicButton
+                  meetingId={meetingId}
+                  presenterMemberId={order[idx]}
+                  presenterName={upNow}
+                  formats={formats}
+                />
+              </div>
             )}
             <div className="flex items-center gap-2">
               <Button

@@ -189,7 +189,9 @@ const captureSchema = z.object({
  * parking_lot_privileged_insert RLS policy.
  */
 export async function captureParkingLotItem(
-  input: z.infer<typeof captureSchema>
+  // z.input (not z.infer) so schema defaults — exploration_format "fsfe",
+  // empty context — are optional at the call site, as intended.
+  input: z.input<typeof captureSchema>
 ) {
   const me = await requireCurrentMember()
   const parsed = captureSchema.parse(input)
