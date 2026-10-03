@@ -91,6 +91,9 @@ export default async function UpdatePage() {
       initialReady={existingUpdate?.ready ?? false}
       formats={formats}
       qolHistory={qolHistory}
+      // Interview questions are voiced by OpenAI when a key is configured;
+      // otherwise the browser's own voice.
+      naturalVoice={!!process.env.OPENAI_API_KEY}
     />
   )
 }

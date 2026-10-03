@@ -28,6 +28,8 @@ type Props = {
   /** The update as it currently stands in the builder. Decides CREATE vs REFINE. */
   currentContent: UpdateContent
   onContentReady: (content: UpdateContent) => void
+  /** Interview questions are voiced by a neural TTS service (vs. the browser). */
+  naturalVoice?: boolean
 }
 
 // Minimal subset of the Web Speech API types we use. Avoids needing
@@ -71,7 +73,11 @@ const THINKING_MESSAGES = [
   "Almost there…",
 ]
 
-export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
+export function BrainDumpDialog({
+  currentContent,
+  onContentReady,
+  naturalVoice = false,
+}: Props) {
   // REFINE once the member has written anything; CREATE on an untouched update.
   const refining = !isEmptyUpdate(currentContent)
   // The dashboard links here with ?ai=brain-dump — open straight into the
@@ -283,6 +289,7 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
             <InterviewMode
               currentContent={currentContent}
               refining={refining}
+              naturalVoice={naturalVoice}
               onGenerated={(c) => {
                 onContentReady(c)
                 toast.success(

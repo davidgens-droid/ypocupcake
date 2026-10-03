@@ -39,6 +39,8 @@ type Props = {
   initialReady: boolean
   formats: ExplorationFormat[]
   qolHistory: Array<Record<string, number>>
+  /** Interview questions are voiced by a neural TTS service (vs. the browser). */
+  naturalVoice?: boolean
 }
 
 export function UpdateBuilder({
@@ -48,6 +50,7 @@ export function UpdateBuilder({
   initialReady,
   formats,
   qolHistory,
+  naturalVoice = false,
 }: Props) {
   const router = useRouter()
   const [step, setStep] = useState(1)
@@ -290,6 +293,7 @@ export function UpdateBuilder({
       {/* AI brain-dump (floating) */}
       <BrainDumpDialog
         currentContent={content}
+        naturalVoice={naturalVoice}
         onContentReady={(c) => {
           setContent(c)
           // Jump to review step so the user can scrub through. Mark the step
