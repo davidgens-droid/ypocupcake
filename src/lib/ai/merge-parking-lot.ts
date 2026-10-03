@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+import { AI_MODEL } from "@/lib/ai/model"
 import { FORMAT_PHASES } from "@/lib/meetings/exploration-phases"
 
 const FORMAT_CODES = Object.keys(FORMAT_PHASES)
@@ -96,7 +97,7 @@ Return the merged topic.`
 
   try {
     const response = await client.messages.create({
-      model: "claude-opus-4-7",
+      model: AI_MODEL,
       max_tokens: 4096,
       thinking: { type: "adaptive" },
       system: systemPrompt,

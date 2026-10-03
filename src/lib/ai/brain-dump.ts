@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+import { AI_MODEL } from "@/lib/ai/model"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 import {
@@ -197,7 +198,7 @@ Now structure this into the YPO update fields.`
   try {
     const response = await client.messages.create(
       {
-        model: "claude-fable-5-1",
+        model: AI_MODEL,
         // Adaptive thinking shares this budget with the JSON answer. 8192 was
         // tight: a long dump could let thinking crowd out the output, truncating
         // the JSON and breaking the parse. 16384 gives both room to breathe.

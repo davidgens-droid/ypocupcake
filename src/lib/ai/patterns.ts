@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
+import { AI_MODEL } from "@/lib/ai/model"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
@@ -100,7 +101,7 @@ If nothing meaningful jumps out, return an empty array. Better silent than to in
 
   try {
     const response = await client.messages.create({
-      model: "claude-opus-4-7",
+      model: AI_MODEL,
       max_tokens: 4096,
       thinking: { type: "adaptive" },
       system: systemPrompt,
