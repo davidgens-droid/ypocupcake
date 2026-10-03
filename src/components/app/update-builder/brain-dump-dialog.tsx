@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react"
 import { useSearchParams } from "next/navigation"
-import { Loader2, Mic, Sparkles, Square } from "lucide-react"
+import { Loader2, MessageCircleQuestion, Mic, Sparkles, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import {
   updateContentSchema,
   type UpdateContent,
 } from "@/lib/updates/schema"
+import { InterviewMode } from "./interview-mode"
 
 type Props = {
   /** The update as it currently stands in the builder. Decides CREATE vs REFINE. */
@@ -81,6 +82,10 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
   )
   // Monotonic id so a result from a superseded request is ignored.
   const requestId = useRef(0)
+  // "interview" is only reachable in CREATE mode (see the mode switch below).
+  const [mode, setMode] = useState<"freeform" | "interview">("freeform")
+  // True from Start until the interview exits — blocks accidental dismissal.
+  const [interviewActive, setInterviewActive] = useState(false)
   const [text, setText] = useState("")
   const [interim, setInterim] = useState("")
   const [recording, setRecording] = useState(false)
@@ -219,7 +224,9 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
         // Never let Escape / backdrop / the X dismiss the dialog while a
         // request is in flight — the result would land on a closed dialog and
         // overwrite whatever the member did in the meantime.
-        if (pending && !next) return
+        if ((pending || interviewActive) && !next) return
+        // Closing always lands back on the typing view next time.
+        if (!next) setMode("freeform")
         setOpen(next)
       }}
     >
@@ -240,20 +247,51 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
         <Sparkles className="size-4" />
         Brain-dump
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md" showCloseButton={!pending}>
+      <DialogContent
+        className="sm:max-w-md"
+        showCloseButton={!pending && !interviewActive}
+      >
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="size-4" />{" "}
-            {refining ? "Refine your update" : "Brain-dump mode"}
+            {refining
+              ? "Refine your update"
+              : mode === "interview"
+                ? "Interview me"
+                : "Brain-dump mode"}
           </DialogTitle>
           <DialogDescription>
             {refining
               ? "Add new thoughts, corrections, or details. I'll fold them into what you've already written — nothing gets dropped unless you say so."
-              : "Talk or type freely. I'll structure it into your update fields and you can review every section before saving."}
+              : mode === "interview"
+                ? "A spoken, one-question-at-a-time conversation. I'll draw out what matters most this month, then turn it into your update."
+                : "Talk or type freely. I'll structure it into your update fields and you can review every section before saving."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-          {pending ? (
+          {/* Keyed on `mode` alone (not `refining`): once the interview has
+              generated content, `refining` flips true in the same batch as the
+              close, and the closing animation must not flash the refine form. */}
+          {mode === "interview" ? (
+            <InterviewMode
+              currentContent={currentContent}
+              onGenerated={(c) => {
+                onContentReady(c)
+                toast.success("Update drafted from your interview. Review and edit each field.")
+                setInterviewActive(false)
+                // Anything typed before switching to the interview must not
+                // pre-fill the next (refine) open.
+                setText("")
+                setInterim("")
+                setOpen(false)
+              }}
+              onExit={() => {
+                setInterviewActive(false)
+                setMode("freeform")
+              }}
+              onActiveChange={setInterviewActive}
+            />
+          ) : pending ? (
             <div className="flex min-h-48 flex-col items-center justify-center gap-4 py-8">
               <div className="relative">
                 <Loader2 className="size-12 animate-spin text-muted-foreground" />
@@ -324,6 +362,21 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
                   {recording ? "Listening…" : `${text.length} chars`}
                 </span>
               </div>
+              {!refining && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit gap-2"
+                  onClick={() => {
+                    if (recording) stopRecording()
+                    setMode("interview")
+                  }}
+                >
+                  <MessageCircleQuestion className="size-4" />
+                  Interview me instead
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 Privacy: processed by Claude. Anthropic doesn&apos;t train on
                 your data. Only you ever see the result.
@@ -331,33 +384,35 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
             </>
           )}
         </div>
-        <div className="flex shrink-0 justify-end gap-2 border-t pt-3">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setOpen(false)}
-            disabled={pending}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={onGenerate}
-            disabled={pending || text.trim().length < 10}
-            className="gap-2"
-          >
-            {pending ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />{" "}
-                {refining ? "Refining…" : "Structuring…"}
-              </>
-            ) : refining ? (
-              "Refine update"
-            ) : (
-              "Generate update"
-            )}
-          </Button>
-        </div>
+        {mode !== "interview" && (
+          <div className="flex shrink-0 justify-end gap-2 border-t pt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={onGenerate}
+              disabled={pending || text.trim().length < 10}
+              className="gap-2"
+            >
+              {pending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />{" "}
+                  {refining ? "Refining…" : "Structuring…"}
+                </>
+              ) : refining ? (
+                "Refine update"
+              ) : (
+                "Generate update"
+              )}
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )
