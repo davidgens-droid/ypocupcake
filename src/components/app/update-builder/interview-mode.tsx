@@ -121,6 +121,12 @@ type Phase =
 
 type Props = {
   currentContent: UpdateContent
+  /**
+   * True when the member already has content: the interviewer starts from
+   * the draft's gaps (or asks what to add) and the generator folds the
+   * answers into the existing update instead of starting fresh.
+   */
+  refining: boolean
   onGenerated: (content: UpdateContent) => void
   onExit: () => void
   /** Lets the dialog block accidental Escape/backdrop closes mid-interview. */
@@ -138,6 +144,7 @@ type Props = {
  */
 export function InterviewMode({
   currentContent,
+  refining,
   onGenerated,
   onExit,
   onActiveChange,
@@ -183,9 +190,9 @@ export function InterviewMode({
 
   // Latest props, readable from async continuations that may outlive the
   // render that started them (a server round-trip, a silence timer).
-  const latest = useRef({ currentContent, onGenerated, onExit, onActiveChange })
+  const latest = useRef({ currentContent, refining, onGenerated, onExit, onActiveChange })
   useEffect(() => {
-    latest.current = { currentContent, onGenerated, onExit, onActiveChange }
+    latest.current = { currentContent, refining, onGenerated, onExit, onActiveChange }
   })
 
   const answered = transcript.filter((m) => m.role === "user").length
@@ -396,7 +403,9 @@ export function InterviewMode({
     setPhase("generating")
     setError(null)
     const brainDump =
-      `Interview transcript for the member's monthly update.\n` +
+      (latest.current.refining
+        ? `Interview transcript — the member is REFINING their existing update (the current draft). Fold what they say here into that draft: add, correct or deepen; keep everything else.\n`
+        : `Interview transcript for the member's monthly update.\n`) +
       `Lines starting "Me:" are the member's own words. Lines starting "Interviewer:" are the AI's questions — prompts only, NOT the member's content.\n\n` +
       base
         .map((m) => `${m.role === "ai" ? "Interviewer" : "Me"}: ${m.text}`)
@@ -436,7 +445,10 @@ export function InterviewMode({
     setError(null)
     let res: Awaited<ReturnType<typeof interviewTurn>>
     try {
-      res = await interviewTurn({ transcript: next })
+      res = await interviewTurn({
+        transcript: next,
+        existing: latest.current.refining ? latest.current.currentContent : undefined,
+      })
     } catch {
       if (superseded()) return
       setError("Lost the connection for a moment. Tap Retry to pick up where we were.")
@@ -681,7 +693,11 @@ export function InterviewMode({
           <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
             <li>I&apos;ll ask one question at a time, out loud. Just talk — I&apos;m listening.</li>
             <li>When you go quiet for a few seconds I&apos;ll move on, or tap <strong>Done answering</strong>. <strong>Pause</strong> holds the floor without losing what you&apos;ve said.</li>
-            <li>I&apos;ll go for what&apos;s most alive this month — the highs, the lows, and why they matter.</li>
+            {refining ? (
+              <li>I&apos;ll start from where your update stands — a gap if there is one, otherwise what you&apos;d like to add or change — and fold your answers into it. Usually just a few questions.</li>
+            ) : (
+              <li>I&apos;ll go for what&apos;s most alive this month — the highs, the lows, and why they matter.</li>
+            )}
             <li>Say <em>&ldquo;that&apos;s enough&rdquo;</em> and I&apos;ll check whether to wrap up. Once you&apos;ve answered at least one question, <strong>Finish &amp; generate</strong> builds your update right away. <strong>Stop</strong> exits without generating.</li>
           </ul>
           {!sttSupported && (
@@ -730,7 +746,7 @@ export function InterviewMode({
           {genMsg}
         </p>
         <p className="text-xs text-muted-foreground">
-          Turning {answered} answer{answered === 1 ? "" : "s"} into your update. Usually 10–30s.
+          {refining ? "Folding" : "Turning"} {answered} answer{answered === 1 ? "" : "s"} into your update. Usually 10–30s.
         </p>
         <Button variant="ghost" size="sm" onClick={cancelGenerate}>
           Cancel — back to the interview

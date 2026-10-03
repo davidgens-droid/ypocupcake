@@ -225,8 +225,11 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
         // request is in flight — the result would land on a closed dialog and
         // overwrite whatever the member did in the meantime.
         if ((pending || interviewActive) && !next) return
-        // Closing always lands back on the typing view next time.
-        if (!next) setMode("freeform")
+        // Every open starts on the typing view. (Reset on OPEN, not close:
+        // a successful interview closes the dialog programmatically, which
+        // never passes through here, and resetting during the close would
+        // flash the typing form behind the closing animation.)
+        if (next) setMode("freeform")
         setOpen(next)
       }}
     >
@@ -254,17 +257,21 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="size-4" />{" "}
-            {refining
-              ? "Refine your update"
-              : mode === "interview"
-                ? "Interview me"
+            {mode === "interview"
+              ? refining
+                ? "Refine by interview"
+                : "Interview me"
+              : refining
+                ? "Refine your update"
                 : "Brain-dump mode"}
           </DialogTitle>
           <DialogDescription>
-            {refining
-              ? "Add new thoughts, corrections, or details. I'll fold them into what you've already written — nothing gets dropped unless you say so."
-              : mode === "interview"
-                ? "A spoken, one-question-at-a-time conversation. I'll draw out what matters most this month, then turn it into your update."
+            {mode === "interview"
+              ? refining
+                ? "A short spoken conversation that picks up where your update leaves off — gaps first, then whatever you'd like to add or change — and folds it in."
+                : "A spoken, one-question-at-a-time conversation. I'll draw out what matters most this month, then turn it into your update."
+              : refining
+                ? "Add new thoughts, corrections, or details. I'll fold them into what you've already written — nothing gets dropped unless you say so."
                 : "Talk or type freely. I'll structure it into your update fields and you can review every section before saving."}
           </DialogDescription>
         </DialogHeader>
@@ -275,9 +282,14 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
           {mode === "interview" ? (
             <InterviewMode
               currentContent={currentContent}
+              refining={refining}
               onGenerated={(c) => {
                 onContentReady(c)
-                toast.success("Update drafted from your interview. Review and edit each field.")
+                toast.success(
+                  refining
+                    ? "Update refined from your interview. Review each field — nothing was dropped."
+                    : "Update drafted from your interview. Review and edit each field."
+                )
                 setInterviewActive(false)
                 // Anything typed before switching to the interview must not
                 // pre-fill the next (refine) open.
@@ -362,21 +374,19 @@ export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
                   {recording ? "Listening…" : `${text.length} chars`}
                 </span>
               </div>
-              {!refining && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-fit gap-2"
-                  onClick={() => {
-                    if (recording) stopRecording()
-                    setMode("interview")
-                  }}
-                >
-                  <MessageCircleQuestion className="size-4" />
-                  Interview me instead
-                </Button>
-              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit gap-2"
+                onClick={() => {
+                  if (recording) stopRecording()
+                  setMode("interview")
+                }}
+              >
+                <MessageCircleQuestion className="size-4" />
+                {refining ? "Refine by interview instead" : "Interview me instead"}
+              </Button>
               <p className="text-xs text-muted-foreground">
                 Privacy: processed by Claude. Anthropic doesn&apos;t train on
                 your data. Only you ever see the result.

@@ -11,6 +11,11 @@ import type {
 } from "@/lib/ai/interview-types"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
+import {
+  isEmptyUpdate,
+  updateContentSchema,
+  type UpdateContent,
+} from "@/lib/updates/schema"
 
 /** Hard cap on questions. The model is told to aim for ~8–14; this is the backstop. */
 const MAX_QUESTIONS = 20
@@ -92,6 +97,9 @@ ARC (a shape, not a script)
 5. Continuity (previous updates, when given): at most one or two questions, on an unfinished goal, lingering vampire, key situation or low score, in their earlier words. Never recite, pad or shame. Only what they say now counts.
 6. Wrap-up, one line (Maya stands for their name): "I think I've got the real picture, Maya. Anything else you want in this update, or shall I put it together?"
 
+REFINE MODE (only when a current draft is provided)
+The member already has this month's update and came back to add or change something. Everything in the draft counts as covered from the first turn: never re-ask it, never recite it, never check it. Open with ONE question. If the draft has an obvious gap (an area with nothing in it, no coming-up item, no vampire, no goal, or a why that stops at rung one), name that gap in one short question, e.g. "Your update says nothing about family yet. Anything there this month, or is it quiet?" Otherwise ask what they'd like to add or change, e.g. "What would you like to add or change, Maya?" Then stay with whatever they bring: feeling, situation, the why, two or three follow-ups at most. These interviews are short, typically two to six questions. Readiness (rule 6) is met as soon as they've said what they came to say. "Nothing, just checking" or similar: go straight to "ready". Coverage: start from the draft, then add what they say.
+
 READING THE MEMBER
 "I don't know": one reframe, never two. Answers that belong elsewhere: follow and credit them, never redirect. Questions back, including "how much longer": answer honestly in a few words, then re-ask. Garbled transcript: "I didn't catch that. Say it again?" Once; never comment on transcription. Heavy disclosures (a diagnosis, a marriage ending, a death): be a human for one sentence, no advice or platitudes, then one gentle question and let them choose whether to go on; this is often the five percent. Safety: any sign of harm to themselves or others stops the interview. Say plainly this matters more than any update and they should reach out right now to someone they trust or emergency services, then ask whether to stop here or put together what they've given, as "ready".
 
@@ -119,7 +127,36 @@ OUTPUT CONTRACT (fixed; return exactly one JSON object, nothing else, no fences,
 - "done": the member has confirmed (or explicitly asked to generate / is out of time and has given at least some content). "question" is exactly "". Generate now.
 - All eight coverage keys always present, true or false, never null. "note" under twenty-five words, only what's in the transcript.
 
-INPUTS: the member's first name; the conversation as alternating AI and member lines (voice transcripts); optional continuity context; the count of questions asked so far (asks and wrap-ups both count; if absent, count the AI lines).`
+INPUTS: the member's first name; the mode (CREATE or REFINE, with the current draft in refine mode); the conversation as alternating AI and member lines (voice transcripts); optional continuity context; the count of questions asked so far (asks and wrap-ups both count; if absent, count the AI lines).`
+
+/**
+ * The current draft, compacted for the refine-mode prompt: just the substance,
+ * no booleans or defaults, empty strings dropped so gaps are visible.
+ */
+function summarizeDraft(c: UpdateContent) {
+  const sec = (s: UpdateContent["business"]) => ({
+    feelings: s.feelings,
+    situation: s.situation,
+    significance: s.significance.filter((x) => x.trim()),
+  })
+  return {
+    quality_of_life: {
+      physical: c.qol.physical_health,
+      mental: c.qol.mental_health,
+      financial: c.qol.financial_health,
+      friends_community: c.qol.friends_community,
+    },
+    business: sec(c.business),
+    family: sec(c.family),
+    personal: sec(c.personal),
+    coming_up: c.coming_up.text
+      ? { text: c.coming_up.text, feelings: c.coming_up.feelings }
+      : null,
+    energy_vampire: c.energy_vampire || null,
+    goal: c.goal.text || null,
+    topic: c.topic.text || null,
+  }
+}
 
 /**
  * The question is read aloud verbatim, so strip anything a TTS engine would
@@ -140,13 +177,35 @@ function cleanSpoken(q: string): string {
  */
 export async function interviewTurn(input: {
   transcript: InterviewMessage[]
+  /**
+   * The member's current draft when they're refining an existing update.
+   * Omitted (or empty) for a fresh interview.
+   */
+  existing?: UpdateContent
 }): Promise<InterviewTurnResponse> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI is not configured (missing ANTHROPIC_API_KEY)." }
   }
 
   const me = await requireCurrentMember()
-  const parsed = inputSchema.safeParse(input)
+
+  // Validate the draft the same way the generator does: a malformed draft is
+  // an error, never silently treated as "no draft".
+  let draft: UpdateContent | null = null
+  if (input.existing !== undefined) {
+    const check = updateContentSchema.safeParse(input.existing)
+    if (!check.success) {
+      const path = check.error.issues[0]?.path.join(".") || "a field"
+      return {
+        ok: false,
+        error: `Your draft has a problem in "${path}" (likely over its length limit). Fix that field, then try again.`,
+      }
+    }
+    if (!isEmptyUpdate(check.data)) draft = check.data
+  }
+  const refining = draft !== null
+
+  const parsed = inputSchema.safeParse({ transcript: input.transcript })
   if (!parsed.success) {
     return {
       ok: false,
@@ -210,8 +269,13 @@ export async function interviewTurn(input: {
           .join("\n")
 
   const userPrompt = `Member: ${firstName}
+Mode: ${refining ? "REFINE — the member already has a draft (below). Follow REFINE MODE." : "CREATE — a new update, no draft yet."}
 Questions asked so far (asks and wrap-ups): ${questionsAsked} (cap ${MAX_QUESTIONS})
 ${
+  draft
+    ? `\nCurrent draft (already covered — never re-ask or recite):\n<current_draft>\n${JSON.stringify(summarizeDraft(draft), null, 2)}\n</current_draft>\n`
+    : ""
+}${
   continuity.length
     ? `\nContinuity context — ${firstName}'s most recent finalized updates (use sparingly, for at most one or two questions):\n${JSON.stringify(continuity, null, 2)}\n`
     : ""
@@ -316,7 +380,7 @@ Decide the next turn and return the JSON.`
 
     await supabase.from("ai_interactions").insert({
       member_id: me.id,
-      kind: "interview_turn",
+      kind: refining ? "interview_turn_refine" : "interview_turn",
       tokens_in: response.usage.input_tokens,
       tokens_out: response.usage.output_tokens,
     })
