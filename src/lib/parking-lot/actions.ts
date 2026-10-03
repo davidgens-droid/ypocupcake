@@ -10,6 +10,7 @@ import {
   type MergeItemInput,
 } from "@/lib/ai/merge-parking-lot"
 import { notifyMember } from "@/lib/notifications/actions"
+import { splitListeningNote } from "@/lib/parking-lot/listening"
 import { createClient } from "@/lib/supabase/server"
 
 const newItemSchema = z.object({
@@ -291,7 +292,7 @@ export async function parkCapturedItem(itemId: string) {
 
   const { data: item } = await supabase
     .from("parking_lot_items")
-    .select("captured_meeting_id")
+    .select("captured_meeting_id, context")
     .eq("id", itemId)
     .single()
 
@@ -301,6 +302,19 @@ export async function parkCapturedItem(itemId: string) {
     .eq("id", itemId)
     .eq("status", "captured")
   if (error) throw new Error(error.message)
+
+  // A kept listening-mode suggestion becomes an ordinary parked item: the
+  // provenance line was for the review screen, not the parking lot. Strip it
+  // with a compare-and-set on the context we read, so a concurrent edit from
+  // another device is never overwritten with a stale body.
+  const { fromListening, body } = splitListeningNote(item?.context)
+  if (fromListening && item?.context) {
+    await supabase
+      .from("parking_lot_items")
+      .update({ context: body || null })
+      .eq("id", itemId)
+      .eq("context", item.context)
+  }
 
   revalidatePath("/forum/parking-lot")
   if (item?.captured_meeting_id)
@@ -365,7 +379,8 @@ export async function mergeCapturedIntoParked(
 
   const capturedInput: MergeItemInput = {
     topic: captured.topic,
-    context: captured.context,
+    // Never feed the provenance line to the merge as if it were content.
+    context: splitListeningNote(captured.context).body || null,
     urgency: captured.urgency,
     tool_category: captured.tool_category,
     exploration_format: captured.exploration_format,

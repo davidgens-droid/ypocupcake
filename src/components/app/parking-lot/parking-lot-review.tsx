@@ -31,7 +31,7 @@ import {
   mergeCapturedIntoParked,
   updateCapturedItem,
 } from "@/lib/parking-lot/actions"
-import { splitListeningNote } from "@/lib/parking-lot/listening"
+import { LISTENING_NOTE, splitListeningNote } from "@/lib/parking-lot/listening"
 import type { FormatOption } from "@/components/app/meeting/capture-topic-button"
 
 export type ReviewItem = {
@@ -263,7 +263,10 @@ function EditCapturedDialog({
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [topic, setTopic] = useState(item.topic)
-  const [context, setContext] = useState(item.context ?? "")
+  // The listening-mode provenance line is a badge, not editable text: the
+  // dialog edits the body and the line is put back on save.
+  const provenance = splitListeningNote(item.context)
+  const [context, setContext] = useState(provenance.body)
   const [urgency, setUrgency] = useState<"low" | "med" | "high">(item.urgency)
   const [formatCode, setFormatCode] = useState(item.exploration_format)
   const [pending, startTransition] = useTransition()
@@ -272,7 +275,7 @@ function EditCapturedDialog({
     if (next) {
       // Reset to the latest values each time it opens.
       setTopic(item.topic)
-      setContext(item.context ?? "")
+      setContext(splitListeningNote(item.context).body)
       setUrgency(item.urgency)
       setFormatCode(item.exploration_format)
     }
@@ -282,7 +285,11 @@ function EditCapturedDialog({
   const fields = () => ({
     itemId: item.id,
     topic,
-    context,
+    context: provenance.fromListening
+      ? context.trim()
+        ? `${LISTENING_NOTE}\n${context.trim()}`
+        : LISTENING_NOTE
+      : context,
     urgency,
     exploration_format: formatCode,
   })
@@ -339,7 +346,9 @@ function EditCapturedDialog({
               value={context}
               onChange={(e) => setContext(e.target.value)}
               rows={3}
-              maxLength={2000}
+              // The provenance line is re-added on save and counts toward
+              // the server's 2000-char limit.
+              maxLength={provenance.fromListening ? 2000 - LISTENING_NOTE.length - 1 : 2000}
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -485,7 +494,7 @@ function ContextLine({ context }: { context: string | null }) {
   return (
     <>
       {fromListening && (
-        <span className="inline-flex w-fit items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-900">
+        <span className="inline-flex w-fit items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-900 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200">
           <Sparkles className="size-3" /> Suggested by listening mode
         </span>
       )}

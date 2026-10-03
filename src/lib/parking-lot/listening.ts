@@ -1,5 +1,5 @@
 // Plain module (no "use server"/"use client") shared by the listening-mode
-// server action and the review UI.
+// route handler, the runner (client) and the review UI.
 
 /**
  * First line of the context on every parking-lot item that listening mode
@@ -18,3 +18,11 @@ export function splitListeningNote(context: string | null | undefined): {
   }
   return { fromListening: false, body: context }
 }
+
+/** Longest transcript the extraction accepts (it clips, never rejects). */
+export const LISTENING_MAX_CHARS = 40_000
+
+export type ListeningTopic = { topic: string; context: string }
+export type ListeningExtractResult =
+  | { ok: true; topics: ListeningTopic[] }
+  | { ok: false; error: string }

@@ -24,7 +24,10 @@ import {
 import { RoundTimer } from "@/components/app/meeting/round-timer"
 import { PresentingOrder } from "@/components/app/meeting/presenting-order"
 import { ListeningModePanel } from "@/components/app/meeting/listening-mode"
-import { extractParkingLotTopics } from "@/lib/ai/listening"
+import {
+  LISTENING_MAX_CHARS,
+  type ListeningExtractResult,
+} from "@/lib/parking-lot/listening"
 import {
   CaptureTopicButton,
   type FormatOption,
@@ -60,6 +63,18 @@ type ParkingLotChoice = {
   topic: string
   exploration_format: ExplorationFormatCode
   format_label: string
+}
+
+/** Round types whose turns are updates worth listening to for parking-lot topics. */
+const LISTENING_ROUND_TYPES = new Set(["updates", "experience_sharing"])
+const ROUND_LABEL: Record<string, string> = {
+  updates: "the updates round",
+  experience_sharing: "experience sharing",
+  commitments: "the commitments round",
+  lightning: "the lightning round",
+  brainstorm: "the brainstorm",
+  needs_and_leads: "needs & leads",
+  exploration: "an exploration",
 }
 
 type Props = {
@@ -136,16 +151,38 @@ export function RunnerControls({
 
   /**
    * Listening mode hands over everything heard during a presenter's turn the
-   * moment it ends. Runs outside `run()` so the next reveal isn't held up by
-   * the extraction; the result lands as a toast + a refreshed captured count.
+   * moment it ends. A plain fetch to a route handler — NOT a Server Action,
+   * which the app router would queue in series and so hold up the next
+   * reveal for the whole extraction. `keepalive` lets a flush fired while
+   * navigating away complete; the result lands as a toast + a refreshed
+   * captured count.
    */
   function flushListening(presenterId: string, transcript: string) {
     const name = memberName[presenterId]?.split(" ")[0] ?? "the presenter"
     const id = toast.loading(
       `Listening mode: looking for parking-lot topics in ${name}'s update…`
     )
-    extractParkingLotTopics({ meetingId, presenterMemberId: presenterId, transcript })
-      .then((res) => {
+    const body = JSON.stringify({
+      meetingId,
+      presenterMemberId: presenterId,
+      transcript: transcript.slice(0, LISTENING_MAX_CHARS),
+    })
+    fetch("/api/listening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      // keepalive bodies are capped at 64KB by browsers.
+      keepalive: body.length < 60_000,
+    })
+      .then(async (httpRes) => {
+        const res = (await httpRes.json().catch(() => null)) as ListeningExtractResult | null
+        if (!httpRes.ok || !res) {
+          toast.error(
+            res && !res.ok ? res.error : "Listening mode: couldn't extract topics. Nothing was saved.",
+            { id, duration: 8000 }
+          )
+          return
+        }
         if (!res.ok) {
           toast.error(res.error, { id, duration: 8000 })
           return
@@ -354,13 +391,16 @@ export function RunnerControls({
             )}
           </div>
 
-          {phase.has_round && (
-            <ListeningModePanel
-              presenterId={presenting && idx < order.length ? order[idx] : null}
-              presenterName={upNow}
-              onFlush={flushListening}
-            />
-          )}
+          {/* Explorations already revolve around a parked topic; members'
+              turns there are responses, not updates — listening is paused,
+              but the switch stays visible so "is it still on?" has an answer. */}
+          <ListeningModePanel
+            meetingId={meetingId}
+            presenterId={null}
+            presenterName={null}
+            pausedLabel={ROUND_LABEL.exploration}
+            onFlush={flushListening}
+          />
 
           {/* Has-round phase, nobody up yet → moderator chooses who shares first */}
           {phase.has_round && !presenting && selectingPool.length > 0 && (
@@ -581,13 +621,25 @@ export function RunnerControls({
           )}
         </div>
 
-        {!done && (
-          <ListeningModePanel
-            presenterId={presenting && idx < order.length ? order[idx] : null}
-            presenterName={upNow}
-            onFlush={flushListening}
-          />
-        )}
+        {/* Only where someone is giving an update — not 60-second commitment
+            or lightning turns, which aren't parking-lot material. */}
+        {!done &&
+          (LISTENING_ROUND_TYPES.has(activeRound.round_type) ? (
+            <ListeningModePanel
+              meetingId={meetingId}
+              presenterId={presenting && idx < order.length ? order[idx] : null}
+              presenterName={upNow}
+              onFlush={flushListening}
+            />
+          ) : (
+            <ListeningModePanel
+              meetingId={meetingId}
+              presenterId={null}
+              presenterName={null}
+              pausedLabel={ROUND_LABEL[activeRound.round_type] ?? "this round"}
+              onFlush={flushListening}
+            />
+          ))}
 
         {/* Selecting state — nobody up yet */}
         {!done && !presenting && (

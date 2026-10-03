@@ -1,27 +1,36 @@
-"use server"
-
+// Server-only module, called from the /api/listening route handler — NOT a
+// Server Action. Server Actions invoked from client components are queued one
+// after another by the app router, so a 20–60s extraction would block the
+// moderator's next "reveal" click; a plain fetch to a route handler doesn't.
 import Anthropic from "@anthropic-ai/sdk"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { AI_MODEL } from "@/lib/ai/model"
-import { requireCurrentMember } from "@/lib/auth/current-member"
-import { LISTENING_NOTE } from "@/lib/parking-lot/listening"
+import type { CurrentMember } from "@/lib/auth/current-member"
+import {
+  LISTENING_MAX_CHARS,
+  LISTENING_NOTE,
+  type ListeningExtractResult,
+  type ListeningTopic,
+} from "@/lib/parking-lot/listening"
 import { createClient } from "@/lib/supabase/server"
 
 // Shorter than this and there's nothing to extract (a cough, a false start).
 const MIN_CHARS = 40
 // ~5–8 minutes of speech is 5–8k characters; this is a generous ceiling.
-const MAX_CHARS = 40_000
+const MAX_CHARS = LISTENING_MAX_CHARS
 const MAX_TOPICS = 5
 const LIMITS = { topic: 200, context: 300 }
 // Same default as quick-jot capture; refined later on the review screen.
 const DEFAULT_FORMAT = "fsfe"
 
+// Clip rather than reject an over-long transcript: refusing would throw away
+// a whole update's worth of listening over a length nobody chose.
 const inputSchema = z.object({
   meetingId: z.string().uuid(),
   presenterMemberId: z.string().uuid(),
-  transcript: z.string().max(MAX_CHARS),
+  transcript: z.string().transform((s) => s.slice(0, MAX_CHARS)),
 })
 
 // No array bound here or in the JSON schema below: the API's structured-output
@@ -29,11 +38,6 @@ const inputSchema = z.object({
 const outputSchema = z.object({
   topics: z.array(z.object({ topic: z.string(), context: z.string() })),
 })
-
-export type ListeningTopic = { topic: string; context: string }
-export type ListeningExtractResult =
-  | { ok: true; topics: ListeningTopic[] }
-  | { ok: false; error: string }
 
 const SYSTEM_PROMPT = `You read a rough, automatic speech transcript of one YPO forum member's monthly update (business, family, personal; feelings and why they matter; what's coming up; an energy vampire; a goal) and list the POTENTIAL parking-lot topics in it: issues, decisions or dilemmas the forum might want to explore together at a future meeting.
 
@@ -59,20 +63,19 @@ OUTPUT: exactly one JSON object {"topics":[{"topic":string,"context":string}]} a
  * parking-lot topics and park them as 'captured' suggestions for the presenter,
  * to be kept / merged / deleted on the post-meeting review screen.
  *
- * The transcript is never stored or logged — not in the database, not in
- * ai_interactions (token counts only), not in server logs. It exists in this
- * request and is gone.
+ * Cupcake never stores or logs the transcript — not in the database, not in
+ * ai_interactions (token counts only), not in server logs. It is sent once to
+ * Anthropic's API (which does not train on it and retains inputs under its
+ * own policy, up to 30 days) and exists here only for this request.
  */
-export async function extractParkingLotTopics(input: {
-  meetingId: string
-  presenterMemberId: string
-  transcript: string
-}): Promise<ListeningExtractResult> {
+export async function extractParkingLotTopics(
+  me: CurrentMember,
+  input: { meetingId: string; presenterMemberId: string; transcript: string }
+): Promise<ListeningExtractResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI is not configured (missing ANTHROPIC_API_KEY)." }
   }
 
-  const me = await requireCurrentMember()
   const supabase = await createClient()
 
   // Same roles that may live-capture (the insert's RLS enforces this too, but
@@ -93,21 +96,41 @@ export async function extractParkingLotTopics(input: {
 
   const parsed = inputSchema.safeParse(input)
   if (!parsed.success) {
-    return { ok: false, error: "That update was too long to process in one go." }
+    return { ok: false, error: "Listening mode: that request was malformed. Nothing was saved." }
   }
   const transcript = parsed.data.transcript.replace(/\s+/g, " ").trim()
   if (transcript.length < MIN_CHARS) return { ok: true, topics: [] }
 
-  const { data: presenter } = await supabase
-    .from("members")
-    .select("name")
-    .eq("id", parsed.data.presenterMemberId)
-    .maybeSingle()
-  const firstName = presenter?.name?.split(" ")[0] ?? "the member"
+  // The ids come from the client: make sure they're OUR meeting (and one
+  // that's actually running) and OUR member before spending tokens or
+  // attaching suggestions to anyone.
+  const [{ data: meeting }, { data: presenter }] = await Promise.all([
+    supabase
+      .from("meetings")
+      .select("id, status")
+      .eq("id", parsed.data.meetingId)
+      .eq("forum_id", me.forum_id)
+      .maybeSingle(),
+    supabase
+      .from("members")
+      .select("name")
+      .eq("id", parsed.data.presenterMemberId)
+      .eq("forum_id", me.forum_id)
+      .maybeSingle(),
+  ])
+  if (!meeting || meeting.status !== "in_progress") {
+    return { ok: false, error: "Listening mode: that meeting isn't running. Nothing was saved." }
+  }
+  if (!presenter) {
+    return { ok: false, error: "Listening mode: that presenter isn't in your forum. Nothing was saved." }
+  }
+  const firstName = presenter.name?.split(" ")[0] ?? "the member"
 
+  // One retry: the SDK's retry-after sleep ignores the abort signal, so two
+  // retries could outlive the page's 120s maxDuration (55 + 55 + backoff).
   const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
-    maxRetries: 2,
+    maxRetries: 1,
     timeout: 55_000,
   })
 
@@ -117,7 +140,9 @@ export async function extractParkingLotTopics(input: {
     const response = await client.messages.create(
       {
         model: AI_MODEL,
-        max_tokens: 2048,
+        // Thinking tokens count against this: with room to spare, a long
+        // transcript can never crowd out the (small) JSON answer.
+        max_tokens: 16_000,
         thinking: { type: "adaptive" },
         system: SYSTEM_PROMPT,
         messages: [
@@ -134,6 +159,9 @@ List the potential parking-lot topics.`,
           },
         ],
         output_config: {
+          // Listing 0–5 dilemmas is not a deep-reasoning task; medium keeps
+          // a long transcript well inside the per-attempt timeout.
+          effort: "medium",
           format: {
             type: "json_schema",
             schema: {
@@ -166,6 +194,10 @@ List the potential parking-lot topics.`,
     if (response.stop_reason === "max_tokens") {
       console.warn("[listening] response truncated", { member: me.id })
       return { ok: false, error: "Listening mode: the extraction got cut off. Nothing was saved." }
+    }
+    if (response.stop_reason === "refusal") {
+      console.warn("[listening] model refused", { member: me.id })
+      return { ok: false, error: "Listening mode: the AI declined to process that update. Nothing was saved." }
     }
     const textBlock = response.content.find((b) => b.type === "text")
     if (!textBlock || textBlock.type !== "text") {
@@ -222,6 +254,20 @@ List the potential parking-lot topics.`,
     tokens_out: usage.output_tokens,
   })
 
+  if (topics.length === 0) return { ok: true, topics: [] }
+
+  // Idempotency without a schema change: if another device (or a retried
+  // flush) already captured listening suggestions for this presenter in this
+  // meeting, don't add the same dilemma twice.
+  const { data: existing } = await supabase
+    .from("parking_lot_items")
+    .select("topic")
+    .eq("captured_meeting_id", parsed.data.meetingId)
+    .eq("submitter_member_id", parsed.data.presenterMemberId)
+    .eq("status", "captured")
+    .like("context", `${LISTENING_NOTE}%`)
+  const already = new Set((existing ?? []).map((r) => (r.topic as string).trim().toLowerCase()))
+  topics = topics.filter((t) => !already.has(t.topic.toLowerCase()))
   if (topics.length === 0) return { ok: true, topics: [] }
 
   const { data: fmt } = await supabase
