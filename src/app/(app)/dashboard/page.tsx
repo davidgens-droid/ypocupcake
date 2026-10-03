@@ -21,6 +21,13 @@ import { PatternCards } from "@/components/app/dashboard/pattern-cards"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
+// Pattern cards are generated inside this page's render (behind Suspense) the
+// first time a member's finalized-update count changes. That AI call can run
+// 10–60s; without this ceiling the function would be killed at Vercel's short
+// default timeout and the whole dashboard would error for that member. Normal
+// renders are unaffected — this only raises the limit, it doesn't slow anything.
+export const maxDuration = 120
+
 function daysUntil(iso: string): number {
   const ms = parseISO(iso).getTime() - Date.now()
   return Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)))
