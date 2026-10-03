@@ -154,18 +154,16 @@ export default async function DashboardPage() {
             {existingUpdate ? "Open my update" : "Start your update"}{" "}
             <ArrowRight className="size-4" />
           </Button>
-          {!existingUpdate && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-fit gap-2"
-              disabled={!nextMeeting}
-              render={<Link href="/me/update?ai=brain-dump" />}
-            >
-              <Sparkles className="size-4" />
-              Brain-dump with AI
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-fit gap-2"
+            disabled={!nextMeeting}
+            render={<Link href="/me/update?ai=brain-dump" />}
+          >
+            <Sparkles className="size-4" />
+            {existingUpdate ? "Refine with AI" : "Brain-dump with AI"}
+          </Button>
           {nextMeeting?.status === "upcoming" && (isModerator || me.is_admin) && (
             <Button
               variant="outline"

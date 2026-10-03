@@ -59,6 +59,32 @@ export const emptyUpdateContent: UpdateContent = updateContentSchema.parse({
   topic: {},
 })
 
+/**
+ * True when an update has nothing the member actually entered — every text
+ * field blank, no feelings, and QoL still at the untouched default of 5s.
+ * Used to decide whether a brain-dump should CREATE (fresh) or REFINE
+ * (fold new thoughts into what's already there).
+ */
+export function isEmptyUpdate(c: UpdateContent): boolean {
+  const sectionEmpty = (s: Reflection) =>
+    s.feelings.length === 0 &&
+    !s.situation.trim() &&
+    s.significance.every((x) => !x.trim())
+  const qolUntouched = Object.values(c.qol).every((v) => v === 5)
+  return (
+    qolUntouched &&
+    sectionEmpty(c.business) &&
+    sectionEmpty(c.family) &&
+    sectionEmpty(c.personal) &&
+    !c.coming_up.text.trim() &&
+    c.coming_up.feelings.length === 0 &&
+    !c.energy_vampire.trim() &&
+    !c.goal.text.trim() &&
+    !c.topic.text.trim() &&
+    !c.topic.context.trim()
+  )
+}
+
 export const FEELING_SUGGESTIONS = [
   "Energized",
   "Frustrated",

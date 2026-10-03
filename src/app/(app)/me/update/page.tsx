@@ -13,8 +13,8 @@ import {
 } from "@/lib/updates/schema"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
-// The AI brain-dump (a Server Action invoked from this page) calls Opus with
-// adaptive thinking, which can take 20–60s on a long dump. Without this, the
+// The AI brain-dump (a Server Action invoked from this page) calls Claude
+// (Fable 5.1) with adaptive thinking, which can take 20–60s on a long dump. Without this, the
 // action runs under Vercel's short default function timeout and gets killed
 // mid-call — the cause of the intermittent failures. Server Actions inherit
 // maxDuration from the page they're invoked on. 120s (Vercel Pro allows up to

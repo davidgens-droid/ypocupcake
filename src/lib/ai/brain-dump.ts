@@ -7,6 +7,8 @@ import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 import {
   emptyUpdateContent,
+  isEmptyUpdate,
+  updateContentSchema,
   type UpdateContent,
 } from "@/lib/updates/schema"
 
@@ -53,15 +55,69 @@ const aiUpdateSchema = z.object({
 
 export type AiUpdateInput = z.infer<typeof aiUpdateSchema>
 
+export type BrainDumpMode = "create" | "refine"
+
+export type BrainDumpResult =
+  | { ok: true; content: UpdateContent; mode: BrainDumpMode }
+  | { ok: false; error: string }
+
+// Hard caps mirroring updateContentSchema. Enforced in code (toUpdateContent)
+// AND stated in the prompt, so AI output can never fail the app's own schema.
+const LIMITS = {
+  situation: 280,
+  whyLayer: 500,
+  comingUp: 500,
+  vampire: 280,
+  goal: 500,
+  topic: 500,
+  feeling: 40,
+} as const
+
 // ─── Server action ──────────────────────────────────────────────────────────
+/**
+ * Turn a free-form brain-dump into a structured update.
+ *
+ * Two modes, chosen automatically and reported back in `mode`:
+ * - CREATE: `existing` is absent or untouched → structure the dump from scratch.
+ * - REFINE: `existing` already has content → fold the new dump into it. The
+ *   member can come back as many times as they like; nothing they've already
+ *   written is dropped unless the new dump says to remove it.
+ *
+ * Whenever `existing` is supplied, its hand-set settings (parking-lot publish
+ * choice, exploration format, urgency, topic context, commitment flag) are
+ * preserved in BOTH modes. If `existing` is malformed we refuse rather than
+ * silently falling back to CREATE — that fallback is exactly how a refine
+ * could wipe a member's update.
+ */
 export async function generateUpdateFromBrainDump(input: {
   brainDump: string
-}): Promise<{ ok: true; content: UpdateContent } | { ok: false; error: string }> {
+  existing?: UpdateContent
+}): Promise<BrainDumpResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI is not configured (missing ANTHROPIC_API_KEY)." }
   }
 
   const me = await requireCurrentMember()
+
+  let base: UpdateContent = emptyUpdateContent
+  let refining = false
+  if (input.existing !== undefined) {
+    const parsed = updateContentSchema.safeParse(input.existing)
+    if (!parsed.success) {
+      const path = parsed.error.issues[0]?.path.join(".") || "a field"
+      console.warn("[brain-dump] existing content failed validation", {
+        member: me.id,
+        path,
+        issue: parsed.error.issues[0]?.message,
+      })
+      return {
+        ok: false,
+        error: `Your current draft has a problem in "${path}" (most likely over its length limit). Fix that field, then try the brain-dump again.`,
+      }
+    }
+    base = parsed.data
+    refining = !isEmptyUpdate(parsed.data)
+  }
 
   // Pull the member's last 3 finalized updates to give the AI context (so
   // recurring themes carry over and QoL ratings stay calibrated). RLS
@@ -82,28 +138,55 @@ export async function generateUpdateFromBrainDump(input: {
   const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
     // Retry transient overloads (429/529) and connection blips with backoff.
+    // The overall deadline below (AbortSignal) keeps retries from ever pushing
+    // total time past the page's 120s function budget.
     maxRetries: 3,
-    // Per-attempt ceiling, kept just under the page's 120s function budget so a
-    // genuinely-hung call surfaces a clean error instead of being killed by the
-    // platform — but high enough that a legitimately long dump still completes.
     timeout: 110_000,
   })
 
-  const systemPrompt = `You are an empathic assistant helping a YPO forum member structure a brain-dump into a YPO 5% Reflection update.
-
-Rules:
-1. Use only what the member has said. Do NOT invent feelings, situations, or scores. If something isn't mentioned, leave it empty (empty string for text, empty array for chips, 5 for QoL scores).
-2. Feelings: 3-5 single-word emotion words per section (e.g. "frustrated", "hopeful", "grateful"). Title-case.
-3. Situations: ONE sentence each. Hard cap.
-4. Significance: three progressively deeper "why" layers. Each layer should reveal something not in the previous. Layer 3 should be the rawest, most personal truth.
-5. QoL scores 1-10: only score what was mentioned. Default to 5 if no signal.
-6. Energy vampire: one drain. Empty if not mentioned.
-7. Goal: one concrete, achievable commitment. Empty if not mentioned.
-8. Topic: a topic the member would benefit from exploring with forum. Empty if not mentioned.
+  const sharedRules = `Rules:
+1. Use only what the member has said. Do NOT invent feelings, situations, or scores.
+2. Feelings: 3-5 single-word emotion words per section (e.g. "frustrated", "hopeful", "grateful"). Title-case. Each word at most ${LIMITS.feeling} characters.
+3. Situations: ONE sentence each, at most ${LIMITS.situation} characters. Hard cap.
+4. Significance: three progressively deeper "why" layers, each at most ${LIMITS.whyLayer} characters. Each layer should reveal something not in the previous. Layer 3 should be the rawest, most personal truth.
+5. Energy vampire: one drain, at most ${LIMITS.vampire} characters. Empty if not mentioned.
+6. Goal: one concrete, achievable commitment, at most ${LIMITS.goal} characters. Empty if not mentioned.
+7. Topic: a topic the member would benefit from exploring with forum, at most ${LIMITS.topic} characters. Empty if not mentioned.
+8. "Most important thing coming up": at most ${LIMITS.comingUp} characters.
 
 Tone: warm, never preachy. The member is the author — you're scaffolding, not coaching.`
 
-  const userPrompt = `Brain dump from ${me.name}:
+  const systemPrompt = refining
+    ? `You are an empathic assistant helping a YPO forum member REFINE an update they've already drafted.
+
+You will receive the member's current draft inside <current_draft> — it uses EXACTLY the same field names you must return — and their new thoughts inside <new_input>. Produce the COMPLETE updated draft: every field, not just the changed ones.
+
+Refinement principles — these override the general rules below:
+- Carry forward every existing field that is still true. Do NOT drop, blank out, shorten, or "improve" content the member did not ask to change.
+- Any field you are NOT changing must be copied character-for-character from <current_draft>. That includes feelings lists (even if an untouched section has fewer than 3 feelings — do not pad it), QoL scores, the goal, and the topic.
+- Where <new_input> ADDS detail to a section, enrich that section. Where it CORRECTS something, replace the old with the new. Where it says to REMOVE something, remove it.
+- QoL scores: keep the existing scores unless <new_input> gives a clear signal to change a specific one. Never reset to 5.
+- There is exactly one goal field and one topic field. If the member asks to add a second, combine it with the existing one in a single natural sentence.
+- Treat the draft as the member's own words. Preserve their voice.
+
+${sharedRules}`
+    : `You are an empathic assistant helping a YPO forum member structure a brain-dump into a YPO 5% Reflection update.
+
+${sharedRules}
+9. If something isn't mentioned, leave it empty (empty string for text, empty array for chips).
+10. QoL scores 1-10: only score what was mentioned. Default to 5 if no signal.`
+
+  const userPrompt = refining
+    ? `<current_draft>
+${JSON.stringify(toAiShape(base), null, 2)}
+</current_draft>
+
+<new_input>
+${input.brainDump}
+</new_input>
+
+${historyContext ? `<calibration_only>\nThese are ${me.name}'s past updates, for calibrating tone and QoL only. Do NOT copy content from them.\n\n${historyContext}\n</calibration_only>\n\n` : ""}Now return the complete refined draft for ${me.name}, keeping everything that is still true.`
+    : `Brain dump from ${me.name}:
 
 ${input.brainDump}
 
@@ -112,70 +195,76 @@ ${historyContext ? `\nFor calibration, here's recent context (do not copy from t
 Now structure this into the YPO update fields.`
 
   try {
-    const response = await client.messages.create({
-      model: "claude-opus-4-7",
-      // Adaptive thinking shares this budget with the JSON answer. 8192 was
-      // tight: a long dump could let thinking crowd out the output, truncating
-      // the JSON and breaking the parse. 16384 gives both room to breathe.
-      max_tokens: 16384,
-      thinking: { type: "adaptive" },
-      system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }],
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              qol: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  physical_health: { type: "integer" },
-                  mental_health: { type: "integer" },
-                  financial_health: { type: "integer" },
-                  friends_community: { type: "integer" },
+    const response = await client.messages.create(
+      {
+        model: "claude-fable-5-1",
+        // Adaptive thinking shares this budget with the JSON answer. 8192 was
+        // tight: a long dump could let thinking crowd out the output, truncating
+        // the JSON and breaking the parse. 16384 gives both room to breathe.
+        max_tokens: 16384,
+        thinking: { type: "adaptive" },
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+        output_config: {
+          format: {
+            type: "json_schema",
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                qol: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    physical_health: { type: "integer" },
+                    mental_health: { type: "integer" },
+                    financial_health: { type: "integer" },
+                    friends_community: { type: "integer" },
+                  },
+                  required: [
+                    "physical_health",
+                    "mental_health",
+                    "financial_health",
+                    "friends_community",
+                  ],
                 },
-                required: [
-                  "physical_health",
-                  "mental_health",
-                  "financial_health",
-                  "friends_community",
-                ],
+                business: sectionJsonSchema(),
+                family: sectionJsonSchema(),
+                personal: sectionJsonSchema(),
+                coming_up_text: { type: "string" },
+                coming_up_feelings: { type: "array", items: { type: "string" } },
+                energy_vampire: { type: "string" },
+                goal_text: { type: "string" },
+                goal_horizon: { type: "string", enum: ["day", "week", "month"] },
+                topic_text: { type: "string" },
               },
-              business: sectionJsonSchema(),
-              family: sectionJsonSchema(),
-              personal: sectionJsonSchema(),
-              coming_up_text: { type: "string" },
-              coming_up_feelings: { type: "array", items: { type: "string" } },
-              energy_vampire: { type: "string" },
-              goal_text: { type: "string" },
-              goal_horizon: { type: "string", enum: ["day", "week", "month"] },
-              topic_text: { type: "string" },
+              required: [
+                "qol",
+                "business",
+                "family",
+                "personal",
+                "coming_up_text",
+                "coming_up_feelings",
+                "energy_vampire",
+                "goal_text",
+                "goal_horizon",
+                "topic_text",
+              ],
             },
-            required: [
-              "qol",
-              "business",
-              "family",
-              "personal",
-              "coming_up_text",
-              "coming_up_feelings",
-              "energy_vampire",
-              "goal_text",
-              "goal_horizon",
-              "topic_text",
-            ],
           },
         },
       },
-    })
+      // Overall deadline across retries, under the page's 120s maxDuration, so
+      // a hung attempt + retry can never get the function killed mid-call.
+      { signal: AbortSignal.timeout(110_000) }
+    )
 
     // If the model hit the token ceiling, the JSON answer is truncated and
     // JSON.parse below would throw a cryptic error. Catch it explicitly.
     if (response.stop_reason === "max_tokens") {
       console.warn("[brain-dump] response truncated at max_tokens", {
         member: me.id,
+        refining,
         usage: response.usage,
       })
       return {
@@ -197,20 +286,46 @@ Now structure this into the YPO update fields.`
     }
 
     const parsed = aiUpdateSchema.parse(JSON.parse(textBlock.text))
+    const content = toUpdateContent(parsed, base)
+
+    // Belt and braces: never hand the client content that fails the app's own
+    // schema (the builder's auto-save and finalize would reject it, and a later
+    // refine would be refused).
+    const check = updateContentSchema.safeParse(content)
+    if (!check.success) {
+      console.warn("[brain-dump] generated content failed schema", {
+        member: me.id,
+        refining,
+        issue: check.error.issues[0],
+      })
+      return {
+        ok: false,
+        error:
+          "The AI produced an update that didn't fit the form (a field came back too long). Please try again.",
+      }
+    }
 
     // Log usage for cost-cap visibility.
     await supabase.from("ai_interactions").insert({
       member_id: me.id,
-      kind: "brain_dump",
+      kind: refining ? "brain_dump_refine" : "brain_dump",
       tokens_in: response.usage.input_tokens,
       tokens_out: response.usage.output_tokens,
     })
 
-    return { ok: true, content: toUpdateContent(parsed) }
+    return { ok: true, content: check.data, mode: refining ? "refine" : "create" }
   } catch (err) {
     // Log the real cause to the server (visible in Vercel logs) so any future
-    // failure is diagnosable instead of a mystery. Order matters: timeout and
-    // connection errors are subclasses of APIError, so check them first.
+    // failure is diagnosable instead of a mystery. Order matters: abort,
+    // timeout and connection errors are all subclasses of APIError, so check
+    // the specific ones first.
+    if (err instanceof Anthropic.APIUserAbortError) {
+      console.error("[brain-dump] overall deadline hit", { member: me.id, refining })
+      return {
+        ok: false,
+        error: "That took too long to process. Try again, or shorten your dump a little.",
+      }
+    }
     if (err instanceof Anthropic.APIConnectionTimeoutError) {
       console.error("[brain-dump] timeout", { member: me.id, message: err.message })
       return {
@@ -280,60 +395,100 @@ function clampScore(n: number): number {
   return Math.max(1, Math.min(10, Math.round(n)))
 }
 
-function clip<T>(arr: T[], max: number): T[] {
-  return arr.slice(0, max)
+function clipStr(s: string, max: number): string {
+  return s.trim().slice(0, max)
 }
 
-function toUpdateContent(ai: AiUpdateInput): UpdateContent {
-  const draft: UpdateContent = {
-    ...emptyUpdateContent,
+/** Trim, drop blanks, cap each word at the schema's 40 chars, cap the count. */
+function normFeelings(arr: string[], max: number): string[] {
+  return arr
+    .map((s) => s.trim().slice(0, LIMITS.feeling))
+    .filter((s) => s.length > 0)
+    .slice(0, max)
+}
+
+/**
+ * Project an UpdateContent onto the flat shape the model must RETURN, so a
+ * refine shows the model exactly the keys it answers with and nothing else.
+ * Non-AI fields (publish flag, format, urgency, topic context, commitment)
+ * are deliberately omitted — they never go through the model.
+ */
+function toAiShape(c: UpdateContent): AiUpdateInput {
+  const sec = (s: UpdateContent["business"]) => ({
+    feelings: s.feelings,
+    situation: s.situation,
+    why_layer_1: s.significance[0],
+    why_layer_2: s.significance[1],
+    why_layer_3: s.significance[2],
+  })
+  return {
+    qol: { ...c.qol },
+    business: sec(c.business),
+    family: sec(c.family),
+    personal: sec(c.personal),
+    coming_up_text: c.coming_up.text,
+    coming_up_feelings: c.coming_up.feelings,
+    energy_vampire: c.energy_vampire,
+    goal_text: c.goal.text,
+    goal_horizon: c.goal.horizon,
+    topic_text: c.topic.text,
+  }
+}
+
+/**
+ * Map the AI's flat output onto UpdateContent, clipping every field to the
+ * app schema's limits. `base` supplies the fields the AI does not own — the
+ * member's parking-lot publish choice, exploration format, urgency, topic
+ * context, and the "make it a commitment" flag — so those are never silently
+ * reset. In CREATE mode with no existing content `base` is the empty default.
+ */
+function toUpdateContent(ai: AiUpdateInput, base: UpdateContent): UpdateContent {
+  const section = (s: AiUpdateInput["business"]): UpdateContent["business"] => ({
+    feelings: normFeelings(s.feelings, 5),
+    situation: clipStr(s.situation, LIMITS.situation),
+    significance: [
+      clipStr(s.why_layer_1, LIMITS.whyLayer),
+      clipStr(s.why_layer_2, LIMITS.whyLayer),
+      clipStr(s.why_layer_3, LIMITS.whyLayer),
+    ],
+  })
+
+  const goalText = clipStr(ai.goal_text, LIMITS.goal)
+  const topicText = clipStr(ai.topic_text, LIMITS.topic)
+
+  return {
+    ...base,
     qol: {
       physical_health: clampScore(ai.qol.physical_health),
       mental_health: clampScore(ai.qol.mental_health),
       financial_health: clampScore(ai.qol.financial_health),
       friends_community: clampScore(ai.qol.friends_community),
     },
-    business: {
-      feelings: clip(ai.business.feelings, 5),
-      situation: ai.business.situation.slice(0, 280),
-      significance: [
-        ai.business.why_layer_1,
-        ai.business.why_layer_2,
-        ai.business.why_layer_3,
-      ],
-    },
-    family: {
-      feelings: clip(ai.family.feelings, 5),
-      situation: ai.family.situation.slice(0, 280),
-      significance: [
-        ai.family.why_layer_1,
-        ai.family.why_layer_2,
-        ai.family.why_layer_3,
-      ],
-    },
-    personal: {
-      feelings: clip(ai.personal.feelings, 5),
-      situation: ai.personal.situation.slice(0, 280),
-      significance: [
-        ai.personal.why_layer_1,
-        ai.personal.why_layer_2,
-        ai.personal.why_layer_3,
-      ],
-    },
+    business: section(ai.business),
+    family: section(ai.family),
+    personal: section(ai.personal),
     coming_up: {
-      text: ai.coming_up_text,
-      feelings: clip(ai.coming_up_feelings, 3),
+      text: clipStr(ai.coming_up_text, LIMITS.comingUp),
+      feelings: normFeelings(ai.coming_up_feelings, 3),
     },
-    energy_vampire: ai.energy_vampire,
+    energy_vampire: clipStr(ai.energy_vampire, LIMITS.vampire),
     goal: {
-      text: ai.goal_text,
+      text: goalText,
       horizon: ai.goal_horizon,
-      make_commitment: false,
+      // A commitment opt-in belongs to the goal the member opted in on. Keep it
+      // only if that goal is still there unchanged; a new or reworded goal
+      // needs a fresh opt-in.
+      make_commitment:
+        base.goal.make_commitment &&
+        goalText.length > 0 &&
+        goalText === base.goal.text.trim(),
     },
     topic: {
-      ...emptyUpdateContent.topic,
-      text: ai.topic_text,
+      ...base.topic,
+      text: topicText,
+      // Never carry a "publish to parking lot" choice onto an empty topic.
+      publish_to_parking_lot:
+        base.topic.publish_to_parking_lot && topicText.length > 0,
     },
   }
-  return draft
 }

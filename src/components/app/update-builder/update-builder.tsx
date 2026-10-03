@@ -289,10 +289,31 @@ export function UpdateBuilder({
 
       {/* AI brain-dump (floating) */}
       <BrainDumpDialog
+        currentContent={content}
         onContentReady={(c) => {
           setContent(c)
-          // Jump to review step so the user can scrub through.
+          // Jump to review step so the user can scrub through. Mark the step
+          // as already-handled so the step-change auto-save effect stays quiet
+          // and the explicit save below is the single source of truth.
+          prev.current = TOTAL_STEPS
           setStep(TOTAL_STEPS)
+          // Persist explicitly. The auto-save effect only fires on a step
+          // CHANGE, so a brain-dump applied while already on the review step
+          // (the normal refine loop) would otherwise live only in memory and
+          // be lost on navigation.
+          startTransition(async () => {
+            try {
+              await saveUpdateDraft({
+                meetingId,
+                content: updateContentSchema.parse(c),
+              })
+              setSavedAt(new Date())
+            } catch (err) {
+              toast.error(
+                err instanceof Error ? err.message : "Couldn't save draft."
+              )
+            }
+          })
         }}
       />
 

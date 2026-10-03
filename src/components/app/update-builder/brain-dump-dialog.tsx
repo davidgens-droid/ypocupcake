@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useTransition } from "react"
+import { useSearchParams } from "next/navigation"
 import { Loader2, Mic, Sparkles, Square } from "lucide-react"
 import { toast } from "sonner"
 
@@ -16,9 +17,15 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { generateUpdateFromBrainDump } from "@/lib/ai/brain-dump"
 import { cn } from "@/lib/utils"
-import type { UpdateContent } from "@/lib/updates/schema"
+import {
+  isEmptyUpdate,
+  updateContentSchema,
+  type UpdateContent,
+} from "@/lib/updates/schema"
 
 type Props = {
+  /** The update as it currently stands in the builder. Decides CREATE vs REFINE. */
+  currentContent: UpdateContent
   onContentReady: (content: UpdateContent) => void
 }
 
@@ -63,8 +70,17 @@ const THINKING_MESSAGES = [
   "Almost there…",
 ]
 
-export function BrainDumpDialog({ onContentReady }: Props) {
-  const [open, setOpen] = useState(false)
+export function BrainDumpDialog({ currentContent, onContentReady }: Props) {
+  // REFINE once the member has written anything; CREATE on an untouched update.
+  const refining = !isEmptyUpdate(currentContent)
+  // The dashboard links here with ?ai=brain-dump — open straight into the
+  // dialog. Lazy-initialised (not an effect) so there's no extra render.
+  const searchParams = useSearchParams()
+  const [open, setOpen] = useState(
+    () => searchParams.get("ai") === "brain-dump"
+  )
+  // Monotonic id so a result from a superseded request is ignored.
+  const requestId = useRef(0)
   const [text, setText] = useState("")
   const [interim, setInterim] = useState("")
   const [recording, setRecording] = useState(false)
@@ -150,19 +166,46 @@ export function BrainDumpDialog({ onContentReady }: Props) {
   }, [open, recording])
 
   function onGenerate() {
+    // Fold any still-interim speech into the payload so the last phrase the
+    // member was saying when they tapped Generate isn't silently dropped.
+    const payload = (
+      text + (interim ? (text.endsWith(" ") || !text ? "" : " ") + interim : "")
+    ).trim()
     if (recording) stopRecording()
-    if (text.trim().length < 10) {
+    if (payload.length < 10) {
       toast.error("Brain-dump is a bit short — give me at least a paragraph.")
       return
     }
+    // Refuse up front if the current draft wouldn't pass the app schema. The
+    // server rejects it too — this just gives a precise message and guarantees
+    // the server can never quietly treat a broken draft as "empty".
+    const check = updateContentSchema.safeParse(currentContent)
+    if (!check.success) {
+      const path = check.error.issues[0]?.path.join(".") || "a field"
+      toast.error(
+        `Your draft has a problem in "${path}" (likely over its length limit). Fix that field, then try again.`
+      )
+      return
+    }
+    const myRequest = ++requestId.current
     startTransition(async () => {
-      const result = await generateUpdateFromBrainDump({ brainDump: text })
+      const result = await generateUpdateFromBrainDump({
+        brainDump: payload,
+        existing: check.data,
+      })
+      // Superseded by a newer request — ignore this result entirely.
+      if (myRequest !== requestId.current) return
       if (!result.ok) {
         toast.error(result.error)
         return
       }
       onContentReady(result.content)
-      toast.success("Update structured. Review and edit each field.")
+      // Trust the server's decision on mode, not our pre-call guess.
+      toast.success(
+        result.mode === "refine"
+          ? "Update refined. Review each field — nothing was dropped."
+          : "Update structured. Review and edit each field."
+      )
       setOpen(false)
       setText("")
       setInterim("")
@@ -170,7 +213,16 @@ export function BrainDumpDialog({ onContentReady }: Props) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // Never let Escape / backdrop / the X dismiss the dialog while a
+        // request is in flight — the result would land on a closed dialog and
+        // overwrite whatever the member did in the meantime.
+        if (pending && !next) return
+        setOpen(next)
+      }}
+    >
       <DialogTrigger
         render={
           <Button
@@ -188,14 +240,16 @@ export function BrainDumpDialog({ onContentReady }: Props) {
         <Sparkles className="size-4" />
         Brain-dump
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" showCloseButton={!pending}>
         <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4" /> Brain-dump mode
+            <Sparkles className="size-4" />{" "}
+            {refining ? "Refine your update" : "Brain-dump mode"}
           </DialogTitle>
           <DialogDescription>
-            Talk or type freely. I&apos;ll structure it into your update fields
-            and you can review every section before saving.
+            {refining
+              ? "Add new thoughts, corrections, or details. I'll fold them into what you've already written — nothing gets dropped unless you say so."
+              : "Talk or type freely. I'll structure it into your update fields and you can review every section before saving."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
@@ -212,7 +266,9 @@ export function BrainDumpDialog({ onContentReady }: Props) {
                 {thinkingMsg}
               </p>
               <p className="text-xs text-muted-foreground">
-                Claude Opus 4.7 is reasoning through your dump. Usually 10–30s.
+                {refining
+                  ? "Claude is folding your new thoughts into your update. Usually 10–30s."
+                  : "Claude is reasoning through your dump. Usually 10–30s."}
               </p>
             </div>
           ) : (
@@ -229,7 +285,11 @@ export function BrainDumpDialog({ onContentReady }: Props) {
                   if (recording) return // freeze edits while listening
                   setText(e.target.value)
                 }}
-                placeholder="What's been going on for you this last month? Business, family, personal — say it however it comes out."
+                placeholder={
+                  refining
+                    ? "What's changed, or what would you add? e.g. \"Actually the business situation improved — we closed the deal. And add a goal about sleeping more.\""
+                    : "What's been going on for you this last month? Business, family, personal — say it however it comes out."
+                }
                 autoFocus
                 className={cn(
                   "min-h-32 max-h-[40dvh] resize-none",
@@ -265,8 +325,8 @@ export function BrainDumpDialog({ onContentReady }: Props) {
                 </span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Privacy: this is processed by Claude with zero retention. Only
-                you ever see the result.
+                Privacy: processed by Claude. Anthropic doesn&apos;t train on
+                your data. Only you ever see the result.
               </p>
             </>
           )}
@@ -288,8 +348,11 @@ export function BrainDumpDialog({ onContentReady }: Props) {
           >
             {pending ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Structuring…
+                <Loader2 className="size-4 animate-spin" />{" "}
+                {refining ? "Refining…" : "Structuring…"}
               </>
+            ) : refining ? (
+              "Refine update"
             ) : (
               "Generate update"
             )}
