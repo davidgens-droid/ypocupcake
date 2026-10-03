@@ -12,6 +12,9 @@ import type { ExplorationFormatCode } from "@/lib/types/domain"
 
 type Params = Promise<{ id: string }>
 
+// Listening-mode extraction (a Claude call) is a Server Action on this route.
+export const maxDuration = 120
+
 export default async function RunMeetingPage({
   params,
 }: {

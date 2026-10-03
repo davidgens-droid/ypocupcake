@@ -26,7 +26,12 @@ const ROUND_LABEL: Record<string, string> = {
 type ActiveRound = {
   id: string
   round_type: string
-  order_member_ids: string[]
+  /** How many presenters this round has. The order itself stays server-side. */
+  total: number
+  /** Computed on the server: this member is the one revealed right now. */
+  is_up_now: boolean
+  /** Only set for privileged viewers (live parking-lot capture). */
+  presenter_id: string | null
   current_index: number
   current_started_at: string | null
   per_member_seconds: number
@@ -41,7 +46,6 @@ type Props = {
   meetingId: string
   status: string
   activeRound: ActiveRound | null
-  myMemberId: string
   isPrivileged?: boolean
   memberName?: Record<string, string>
   formats?: FormatOption[]
@@ -51,7 +55,6 @@ export function MemberMeetingView({
   meetingId,
   status,
   activeRound,
-  myMemberId,
   isPrivileged = false,
   memberName = {},
   formats = [],
@@ -86,26 +89,16 @@ export function MemberMeetingView({
       ? getCurrentPhase(activeRound.exploration_format, activeRound.phase_index ?? 0)
       : null
 
-    const myIndex = activeRound.order_member_ids.indexOf(myMemberId)
     const hasPresenterRound =
       phase?.has_round ?? activeRound.round_type !== "exploration"
     // Someone is only "up" once the moderator has revealed them (the round/phase
     // sits in a "selecting" state — current_started_at null — until then).
-    const isUpNow =
-      hasPresenterRound &&
-      activeRound.current_started_at != null &&
-      myIndex >= 0 &&
-      myIndex === activeRound.current_index
+    const isUpNow = hasPresenterRound && activeRound.is_up_now
     const selecting =
       hasPresenterRound && activeRound.current_started_at == null
 
     // The member currently presenting (for privileged live-capture).
-    const presenterId =
-      hasPresenterRound &&
-      activeRound.current_started_at != null &&
-      activeRound.current_index < activeRound.order_member_ids.length
-        ? activeRound.order_member_ids[activeRound.current_index]
-        : null
+    const presenterId = hasPresenterRound ? activeRound.presenter_id : null
     const presenterName = presenterId ? memberName[presenterId] : null
 
     const label = isExploration
@@ -142,8 +135,8 @@ export function MemberMeetingView({
           </div>
           {(phase?.has_round || !isExploration) && (
             <p className="text-sm text-muted-foreground">
-              {Math.min(activeRound.current_index, activeRound.order_member_ids.length)} of{" "}
-              {activeRound.order_member_ids.length} done.
+              {Math.min(activeRound.current_index, activeRound.total)} of{" "}
+              {activeRound.total} done.
             </p>
           )}
           {(phase?.has_round || !isExploration) && (

@@ -3,10 +3,9 @@
 import { useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, Circle, CircleDot, ClipboardList } from "lucide-react"
+import { ClipboardList } from "lucide-react"
 import { toast } from "sonner"
 
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -23,6 +22,9 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { RoundTimer } from "@/components/app/meeting/round-timer"
+import { PresentingOrder } from "@/components/app/meeting/presenting-order"
+import { ListeningModePanel } from "@/components/app/meeting/listening-mode"
+import { extractParkingLotTopics } from "@/lib/ai/listening"
 import {
   CaptureTopicButton,
   type FormatOption,
@@ -37,11 +39,14 @@ import {
   adjustTimer,
   cancelActiveRound,
   closeMeeting,
+  reorderRound,
   resetMeeting,
   revealPresenter,
+  shuffleRemaining,
   startExploration,
   startMeeting,
   startRound,
+  type OrderResult,
 } from "@/lib/meetings/actions"
 import {
   getCurrentPhase,
@@ -108,6 +113,56 @@ export function RunnerControls({
         toast.error(err instanceof Error ? err.message : "Action failed.")
       }
     })
+  }
+
+  /**
+   * Order edits (drag / arrows / shuffle) run outside the shared transition so
+   * the list stays interactive, return the server's verdict so the list can
+   * snap back on failure, and ALWAYS refresh — a refusal means the server
+   * knows something this screen doesn't.
+   */
+  async function applyOrder(work: () => Promise<OrderResult>): Promise<boolean> {
+    try {
+      const res = await work()
+      if (!res.ok) toast.error(res.error, { duration: 6000 })
+      router.refresh()
+      return res.ok
+    } catch {
+      toast.error("Couldn't save the order. Check your connection and try again.")
+      router.refresh()
+      return false
+    }
+  }
+
+  /**
+   * Listening mode hands over everything heard during a presenter's turn the
+   * moment it ends. Runs outside `run()` so the next reveal isn't held up by
+   * the extraction; the result lands as a toast + a refreshed captured count.
+   */
+  function flushListening(presenterId: string, transcript: string) {
+    const name = memberName[presenterId]?.split(" ")[0] ?? "the presenter"
+    const id = toast.loading(
+      `Listening mode: looking for parking-lot topics in ${name}'s update…`
+    )
+    extractParkingLotTopics({ meetingId, presenterMemberId: presenterId, transcript })
+      .then((res) => {
+        if (!res.ok) {
+          toast.error(res.error, { id, duration: 8000 })
+          return
+        }
+        if (res.topics.length === 0) {
+          toast.success(`Listening mode: no parking-lot topics spotted in ${name}'s update.`, { id })
+          return
+        }
+        toast.success(
+          `Listening mode: ${res.topics.length} potential topic${res.topics.length === 1 ? "" : "s"} captured for ${name} — review after the meeting.`,
+          { id, duration: 8000 }
+        )
+        router.refresh()
+      })
+      .catch(() => {
+        toast.error("Listening mode: couldn't extract topics. Nothing was saved.", { id })
+      })
   }
 
   const reviewButton =
@@ -299,6 +354,14 @@ export function RunnerControls({
             )}
           </div>
 
+          {phase.has_round && (
+            <ListeningModePanel
+              presenterId={presenting && idx < order.length ? order[idx] : null}
+              presenterName={upNow}
+              onFlush={flushListening}
+            />
+          )}
+
           {/* Has-round phase, nobody up yet → moderator chooses who shares first */}
           {phase.has_round && !presenting && selectingPool.length > 0 && (
             <PresenterPicker
@@ -434,11 +497,20 @@ export function RunnerControls({
           )}
 
           {phase.has_round && (
-            <RoundRoster
+            <PresentingOrder
               order={order}
               currentIndex={idx}
               presenting={presenting}
               memberName={memberName}
+              pending={pending}
+              onReorder={(tail) =>
+                applyOrder(() =>
+                  reorderRound({ roundId: activeRound.id, orderMemberIds: tail })
+                )
+              }
+              onShuffle={() =>
+                void applyOrder(() => shuffleRemaining({ roundId: activeRound.id }))
+              }
             />
           )}
 
@@ -493,10 +565,29 @@ export function RunnerControls({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Choose who goes {idx === 0 ? "first" : "next"} — or hit Random.
+              {selectingPool[0] ? (
+                <>
+                  Up {idx === 0 ? "first" : "next"}:{" "}
+                  <span className="font-medium text-foreground">
+                    {memberName[selectingPool[0]] ?? "Unknown"}
+                  </span>
+                  . Reveal them, pick someone else, or drag the list below to
+                  change the order.
+                </>
+              ) : (
+                "Nobody left to reveal."
+              )}
             </p>
           )}
         </div>
+
+        {!done && (
+          <ListeningModePanel
+            presenterId={presenting && idx < order.length ? order[idx] : null}
+            presenterName={upNow}
+            onFlush={flushListening}
+          />
+        )}
 
         {/* Selecting state — nobody up yet */}
         {!done && !presenting && (
@@ -582,11 +673,20 @@ export function RunnerControls({
           </div>
         )}
 
-        <RoundRoster
+        <PresentingOrder
           order={order}
           currentIndex={idx}
           presenting={presenting}
           memberName={memberName}
+          pending={pending}
+          onReorder={(tail) =>
+            applyOrder(() =>
+              reorderRound({ roundId: activeRound.id, orderMemberIds: tail })
+            )
+          }
+          onShuffle={() =>
+            void applyOrder(() => shuffleRemaining({ roundId: activeRound.id }))
+          }
         />
 
         <ConfirmDialog
@@ -636,72 +736,13 @@ export function RunnerControls({
   )
 }
 
+const RANDOM = "__random__"
+
 /**
- * Moderator-only checklist of who has presented this round/phase. Members never
- * see this. Sorted alphabetically so the not-yet-revealed names don't imply an
- * upcoming order.
+ * "Who's next?" — defaults to the next name in the presenting order (which the
+ * moderator can rearrange in the list below), with the option to jump to a
+ * specific person or let the server pick someone at random.
  */
-function RoundRoster({
-  order,
-  currentIndex,
-  presenting,
-  memberName,
-}: {
-  order: string[]
-  currentIndex: number
-  presenting: boolean
-  memberName: Record<string, string>
-}) {
-  if (order.length === 0) return null
-
-  const doneIds = new Set(order.slice(0, currentIndex))
-  const currentId =
-    presenting && currentIndex < order.length ? order[currentIndex] : null
-
-  const rows = order
-    .map((id) => ({
-      id,
-      name: memberName[id] ?? "Unknown",
-      status:
-        id === currentId ? "current" : doneIds.has(id) ? "done" : "todo",
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Presenters · {doneIds.size} of {order.length} done
-      </p>
-      <ul className="space-y-1">
-        {rows.map((r) => (
-          <li key={r.id} className="flex items-center gap-2 text-sm">
-            {r.status === "done" ? (
-              <Check className="size-4 shrink-0 text-emerald-600" />
-            ) : r.status === "current" ? (
-              <CircleDot className="size-4 shrink-0 text-foreground" />
-            ) : (
-              <Circle className="size-4 shrink-0 text-muted-foreground/40" />
-            )}
-            <span
-              className={cn(
-                r.status === "done" && "text-muted-foreground line-through",
-                r.status === "current" && "font-semibold"
-              )}
-            >
-              {r.name}
-            </span>
-            {r.status === "current" && (
-              <span className="ml-auto text-xs text-muted-foreground">
-                up now
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
 function PresenterPicker({
   label,
   pool,
@@ -711,20 +752,31 @@ function PresenterPicker({
   onReveal,
 }: {
   label: string
+  /** Not-yet-revealed members, in presenting order. */
   pool: string[]
   memberName: Record<string, string>
   pending: boolean
   cta: (selectedName: string | null) => string
   onReveal: (memberId: string | null) => void
 }) {
-  // "" = Random (let the server pick from the remaining pool).
+  // "" = next in order; RANDOM = let the server pick; otherwise a member id.
   const [selected, setSelected] = useState<string>("")
 
-  const choices = pool
+  const nextId = pool[0] ?? null
+  const nextName = nextId ? memberName[nextId] ?? "Unknown" : null
+  const others = pool
+    .filter((id) => id !== nextId)
     .map((id) => ({ id, name: memberName[id] ?? "Unknown" }))
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  const selectedName = selected ? memberName[selected] ?? null : null
+  // Never null for an explicit pick — a member missing from the name map must
+  // still read "Reveal Unknown", not "Reveal random".
+  const selectedName =
+    selected === RANDOM
+      ? null
+      : selected
+        ? memberName[selected] ?? "Unknown"
+        : nextName
 
   return (
     <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
@@ -732,12 +784,17 @@ function PresenterPicker({
       <Select value={selected} onValueChange={(v) => setSelected(v ?? "")}>
         <SelectTrigger className="w-full">
           <span data-slot="select-value">
-            {selected ? selectedName : "🎲 Random"}
+            {selected === RANDOM
+              ? "🎲 Random"
+              : selected
+                ? selectedName
+                : `Next in order · ${nextName ?? "—"}`}
           </span>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">🎲 Random</SelectItem>
-          {choices.map((c) => (
+          <SelectItem value="">Next in order · {nextName ?? "—"}</SelectItem>
+          <SelectItem value={RANDOM}>🎲 Random</SelectItem>
+          {others.map((c) => (
             <SelectItem key={c.id} value={c.id}>
               {c.name}
             </SelectItem>
@@ -747,7 +804,9 @@ function PresenterPicker({
       <Button
         className="w-full"
         disabled={pending || pool.length === 0}
-        onClick={() => onReveal(selected || null)}
+        onClick={() =>
+          onReveal(selected === RANDOM ? null : selected || nextId)
+        }
       >
         {cta(selectedName)}
       </Button>

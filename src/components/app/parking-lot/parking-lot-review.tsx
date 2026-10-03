@@ -31,6 +31,7 @@ import {
   mergeCapturedIntoParked,
   updateCapturedItem,
 } from "@/lib/parking-lot/actions"
+import { splitListeningNote } from "@/lib/parking-lot/listening"
 import type { FormatOption } from "@/components/app/meeting/capture-topic-button"
 
 export type ReviewItem = {
@@ -466,14 +467,33 @@ function ItemBody({
         <span className="capitalize">· {item.urgency}</span>
       </div>
       <p className="text-sm font-medium">{item.topic}</p>
-      {item.context && (
-        <p className="line-clamp-3 text-xs text-muted-foreground whitespace-pre-line">
-          {item.context}
-        </p>
-      )}
+      <ContextLine context={item.context} />
       <p className="text-xs text-muted-foreground">
         For {memberName[item.submitter_member_id] ?? "—"}
       </p>
     </div>
+  )
+}
+
+/**
+ * Captured context, with the listening-mode provenance line rendered as a
+ * badge so AI-suggested topics are obviously AI-suggested at review time.
+ */
+function ContextLine({ context }: { context: string | null }) {
+  const { fromListening, body } = splitListeningNote(context)
+  if (!fromListening && !body) return null
+  return (
+    <>
+      {fromListening && (
+        <span className="inline-flex w-fit items-center gap-1 rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-900">
+          <Sparkles className="size-3" /> Suggested by listening mode
+        </span>
+      )}
+      {body && (
+        <p className="line-clamp-3 text-xs text-muted-foreground whitespace-pre-line">
+          {body}
+        </p>
+      )}
+    </>
   )
 }

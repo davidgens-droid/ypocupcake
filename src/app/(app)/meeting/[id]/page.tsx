@@ -47,7 +47,7 @@ export default async function MeetingPage({ params }: { params: Params }) {
 
   if (!meeting) notFound()
 
-  const activeRound = (rounds ?? []).find((r) => !r.ended_at) ?? null
+  const rawRound = (rounds ?? []).find((r) => !r.ended_at) ?? null
 
   // Privileged viewers (czar / moderator / asst-moderator / admin) can capture
   // parking-lot items for the presenter, even from the member view.
@@ -60,6 +60,23 @@ export default async function MeetingPage({ params }: { params: Params }) {
   const memberName = Object.fromEntries(
     (members ?? []).map((m) => [m.id, m.name])
   )
+
+  // The presenting order is the moderator's to see and arrange; it never
+  // leaves the server for a member. The view only needs these scalars.
+  const activeRound = rawRound
+    ? (() => {
+        const { order_member_ids, ...rest } = rawRound
+        const order = (order_member_ids ?? []) as string[]
+        const idx = rest.current_index ?? 0
+        const someoneUp = rest.current_started_at != null && idx < order.length
+        return {
+          ...rest,
+          total: order.length,
+          is_up_now: someoneUp && order[idx] === me.id,
+          presenter_id: isPrivileged && someoneUp ? order[idx] : null,
+        }
+      })()
+    : null
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
@@ -81,7 +98,6 @@ export default async function MeetingPage({ params }: { params: Params }) {
         meetingId={meeting.id}
         status={meeting.status}
         activeRound={activeRound}
-        myMemberId={me.id}
         isPrivileged={isPrivileged}
         memberName={memberName}
         formats={formats ?? []}

@@ -53,11 +53,17 @@ function pickForSlot(
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
-/** Move `memberId` to position `slot` (searching only the unrevealed tail). */
-function swapToSlot(order: string[], slot: number, memberId: string) {
+/**
+ * Move `memberId` to position `slot` (searching only the unrevealed tail),
+ * shifting everyone in between down one. A *move*, not a swap: the moderator
+ * can see and curate the upcoming order now, so picking someone out of turn
+ * must leave the rest of their arrangement intact.
+ */
+function moveToSlot(order: string[], slot: number, memberId: string) {
   const j = order.indexOf(memberId, slot)
-  if (j === -1) return
-  ;[order[slot], order[j]] = [order[j], order[slot]]
+  if (j === -1 || j === slot) return
+  const [m] = order.splice(j, 1)
+  order.splice(slot, 0, m)
 }
 
 export async function startMeeting(meetingId: string) {
@@ -156,7 +162,7 @@ export async function revealPresenter(input: z.infer<typeof revealSchema>) {
   const slot = round.current_index ?? 0
   const chosen = pickForSlot(order, slot, parsed.memberId ?? null)
   if (!chosen) return
-  swapToSlot(order, slot, chosen)
+  moveToSlot(order, slot, chosen)
 
   const { error: updErr } = await supabase
     .from("meeting_rounds")
@@ -204,7 +210,7 @@ export async function advanceRound(input: z.infer<typeof advanceRoundSchema>) {
     if (error) throw new Error(error.message)
   } else {
     const chosen = pickForSlot(order, nextIndex, parsed.nextMemberId ?? null)
-    if (chosen) swapToSlot(order, nextIndex, chosen)
+    if (chosen) moveToSlot(order, nextIndex, chosen)
     const { error } = await supabase
       .from("meeting_rounds")
       .update({
@@ -235,6 +241,127 @@ export async function adjustTimer(roundId: string, deltaSeconds: number) {
     .eq("id", roundId)
   if (error) throw new Error(error.message)
   revalidatePath(`/meeting/${round.meeting_id}/run`)
+}
+
+/**
+ * How many positions at the front of the order are fixed: everyone who has
+ * already presented, plus whoever is up right now. Only the tail after this
+ * can be reordered or shuffled.
+ */
+function lockedCount(
+  round: { current_index: number | null; current_started_at: string | null },
+  length: number
+) {
+  const idx = round.current_index ?? 0
+  return Math.min(round.current_started_at ? idx + 1 : idx, length)
+}
+
+/**
+ * Expected outcomes are RETURNED, not thrown: production scrubs thrown Server
+ * Action messages to a generic string, and "the order changed under you" is
+ * exactly the message the moderator needs to read.
+ */
+export type OrderResult = { ok: true } | { ok: false; error: string }
+
+const STALE_ORDER =
+  "The order changed under you (someone was revealed or another moderator edited it). It's been refreshed — try again."
+
+type ReorderableRound = {
+  id: string
+  meeting_id: string
+  current_index: number | null
+  current_started_at: string | null
+  ended_at: string | null
+}
+
+async function loadReorderableRound(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  roundId: string
+): Promise<
+  | { ok: true; round: ReorderableRound; head: string[]; tail: string[] }
+  | { ok: false; error: string }
+> {
+  const { data: round, error } = await supabase
+    .from("meeting_rounds")
+    .select("id, meeting_id, order_member_ids, current_index, current_started_at, ended_at")
+    .eq("id", roundId)
+    .single()
+  if (error || !round) return { ok: false, error: "That round no longer exists." }
+  if (round.ended_at) return { ok: false, error: "That round has already ended." }
+  const order = [...(round.order_member_ids ?? [])] as string[]
+  const locked = lockedCount(round, order.length)
+  return { ok: true, round, head: order.slice(0, locked), tail: order.slice(locked) }
+}
+
+/**
+ * Write a new tail, but only if the round is still exactly where it was when
+ * the tail was read (same current slot, same presenter state). A concurrent
+ * reveal/advance by another moderator changes those, and a blind write would
+ * clobber it; zero rows updated means "stale", which the caller reports.
+ */
+async function writeTail(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  round: ReorderableRound,
+  head: string[],
+  tail: string[]
+): Promise<OrderResult> {
+  let q = supabase
+    .from("meeting_rounds")
+    .update({ order_member_ids: [...head, ...tail] })
+    .eq("id", round.id)
+    .eq("current_index", round.current_index ?? 0)
+    .is("ended_at", null)
+  q = round.current_started_at
+    ? q.eq("current_started_at", round.current_started_at)
+    : q.is("current_started_at", null)
+  const { data, error } = await q.select("id")
+  if (error) {
+    console.error("[meetings] order write failed", { round: round.id, message: error.message })
+    return { ok: false, error: "Couldn't save the order. Check your connection and try again." }
+  }
+  if (!data || data.length === 0) return { ok: false, error: STALE_ORDER }
+  revalidatePath(`/meeting/${round.meeting_id}/run`)
+  return { ok: true }
+}
+
+const reorderSchema = z.object({
+  roundId: z.string().uuid(),
+  orderMemberIds: z.array(z.string().uuid()).max(200),
+})
+
+/**
+ * Replace the *upcoming* presenting order (everyone not yet revealed) with the
+ * moderator's arrangement. The submitted list must be exactly the current
+ * tail, reordered — if someone was revealed or another moderator changed the
+ * order in the meantime, the sets won't match and we refuse rather than
+ * silently drop or resurrect a presenter.
+ */
+export async function reorderRound(
+  input: z.infer<typeof reorderSchema>
+): Promise<OrderResult> {
+  const { supabase } = await ensureMod()
+  const parsed = reorderSchema.parse(input)
+  const loaded = await loadReorderableRound(supabase, parsed.roundId)
+  if (!loaded.ok) return loaded
+
+  const next = parsed.orderMemberIds
+  const samePeople =
+    next.length === loaded.tail.length &&
+    new Set(next).size === next.length &&
+    next.every((id) => loaded.tail.includes(id))
+  if (!samePeople) return { ok: false, error: STALE_ORDER }
+
+  return writeTail(supabase, loaded.round, loaded.head, next)
+}
+
+/** Re-randomise only the members who haven't presented yet. */
+export async function shuffleRemaining(input: { roundId: string }): Promise<OrderResult> {
+  const { supabase } = await ensureMod()
+  const roundId = z.string().uuid().parse(input.roundId)
+  const loaded = await loadReorderableRound(supabase, roundId)
+  if (!loaded.ok) return loaded
+  if (loaded.tail.length < 2) return { ok: true }
+  return writeTail(supabase, loaded.round, loaded.head, shuffle(loaded.tail))
 }
 
 /**
@@ -420,7 +547,7 @@ export async function advanceExploration(
     const slot = presenting ? (round.current_index ?? 0) + 1 : round.current_index ?? 0
     if (slot < order.length) {
       const chosen = pickForSlot(order, slot, nextMemberId ?? null)
-      if (chosen) swapToSlot(order, slot, chosen)
+      if (chosen) moveToSlot(order, slot, chosen)
       const { error } = await supabase
         .from("meeting_rounds")
         .update({
