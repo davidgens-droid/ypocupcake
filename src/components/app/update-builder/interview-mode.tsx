@@ -139,33 +139,34 @@ type Props = {
   onActiveChange: (active: boolean) => void
 }
 
-/**
- * 80ms of silence as a WAV blob URL. Played inside the Start tap so iOS and
- * Android let the same <audio> element play fetched questions later without
- * a fresh gesture. Built in code rather than pasted as a 2KB data URI.
- */
-function silentWavUrl(): string {
-  const samples = 640 // 80ms at 8kHz
-  const dataLen = samples * 2
-  const buf = new ArrayBuffer(44 + dataLen)
-  const v = new DataView(buf)
-  const str = (offset: number, s: string) => {
-    for (let i = 0; i < s.length; i++) v.setUint8(offset + i, s.charCodeAt(i))
+// ─── Natural-voice playback: Web Audio, NOT an <audio> element ──────────────
+// On iOS, an HTML5 <audio>/<video> element switches the device's audio session
+// to playback and WebKit never restores play-and-record afterwards, so every
+// SpeechRecognition started after the first question hangs (no results, then
+// "audio-capture"). AudioContext playback uses a different WebKit path that
+// shares the hardware session with the recognizer. One context, created and
+// resumed inside the Start tap (iOS only unlocks audio in a user gesture).
+let sharedAudioCtx: AudioContext | null = null
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null
+  const Ctor =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!Ctor) return null
+  if (!sharedAudioCtx) sharedAudioCtx = new Ctor()
+  return sharedAudioCtx
+}
+/** Resume + play one silent sample, inside a user gesture. */
+function unlockAudio(ctx: AudioContext) {
+  try {
+    void ctx.resume()
+    const src = ctx.createBufferSource()
+    src.buffer = ctx.createBuffer(1, 1, 22050)
+    src.connect(ctx.destination)
+    src.start(0)
+  } catch {
+    // ignore — playback will try again per question and fall back
   }
-  str(0, "RIFF")
-  v.setUint32(4, 36 + dataLen, true)
-  str(8, "WAVE")
-  str(12, "fmt ")
-  v.setUint32(16, 16, true) // PCM chunk size
-  v.setUint16(20, 1, true) // PCM
-  v.setUint16(22, 1, true) // mono
-  v.setUint32(24, 8000, true) // sample rate
-  v.setUint32(28, 16000, true) // byte rate
-  v.setUint16(32, 2, true) // block align
-  v.setUint16(34, 16, true) // bits per sample
-  str(36, "data")
-  v.setUint32(40, dataLen, true)
-  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }))
 }
 
 /**
@@ -219,13 +220,11 @@ export function InterviewMode({
   const speakGuard = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Resolves the in-flight speak() promise early (mute / stop / finish).
   const speakResolve = useRef<(() => void) | null>(null)
-  // Natural voice: one <audio> element, created and unlocked in the Start
-  // tap, reused for every question. `naturalRef` flips off for the rest of
-  // the interview after a failure so each question doesn't wait on a dead
-  // route; `objectUrl` is the current MP3 blob URL (revoked when replaced).
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  // Natural voice: the currently playing Web Audio source (for cancel).
+  // `naturalRef` flips off for the rest of the interview after a failure so
+  // each question doesn't wait on a dead route.
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null)
   const naturalRef = useRef(naturalVoice)
-  const objectUrl = useRef<string | null>(null)
   const retryRef = useRef<(() => void) | null>(null)
   // Bumped whenever the member takes over (stop / finish / repeat / restart /
   // cancel) so a turn that was mid-await can't resume and change the phase.
@@ -269,32 +268,32 @@ export function InterviewMode({
   }
 
   // ── text-to-speech ────────────────────────────────────────────────────────
-  function cancelSpeech() {
-    if (ttsAvailable()) window.speechSynthesis.cancel()
-    const a = audioRef.current
-    if (a) {
+  function stopSource() {
+    const src = sourceRef.current
+    sourceRef.current = null
+    if (src) {
       try {
-        a.pause()
+        src.onended = null
+        src.stop()
+        src.disconnect()
       } catch {
-        // ignore
+        // already stopped
       }
     }
+  }
+
+  function cancelSpeech() {
+    if (ttsAvailable()) window.speechSynthesis.cancel()
+    stopSource()
     // Not every browser fires onend after cancel() — resolve it ourselves.
     speakResolve.current?.()
   }
 
-  function releaseObjectUrl() {
-    if (objectUrl.current) {
-      URL.revokeObjectURL(objectUrl.current)
-      objectUrl.current = null
-    }
-  }
-
-  /** Natural voice via /api/tts. Resolves false if it couldn't play. */
+  /** Natural voice via /api/tts, played through Web Audio. Resolves false if it couldn't play. */
   async function speakNatural(text: string): Promise<boolean> {
-    const a = audioRef.current
-    if (!a) return false
-    let blob: Blob
+    const ctx = getAudioCtx()
+    if (!ctx) return false
+    let bytes: ArrayBuffer
     try {
       const res = await fetch("/api/tts", {
         method: "POST",
@@ -305,46 +304,64 @@ export function InterviewMode({
       // A redirect to /login (session expired) comes back as 200 HTML —
       // only real audio counts.
       if (!res.ok || !res.headers.get("content-type")?.startsWith("audio/")) return false
-      blob = await res.blob()
+      bytes = await res.arrayBuffer()
     } catch {
       return false
     }
     if (stoppedRef.current || mutedRef.current) return true
+    let buffer: AudioBuffer
+    try {
+      buffer = await ctx.decodeAudioData(bytes)
+    } catch {
+      return false
+    }
+    if (stoppedRef.current || mutedRef.current) return true
+    if (ctx.state !== "running") {
+      try {
+        await ctx.resume()
+      } catch {
+        // play() below will tell us
+      }
+    }
     return new Promise<boolean>((resolve) => {
       let done = false
+      const src = ctx.createBufferSource()
       const finish = (ok: boolean) => {
         if (done) return
         done = true
         if (speakGuard.current) clearTimeout(speakGuard.current)
         speakGuard.current = null
         if (speakResolve.current === finishOk) speakResolve.current = null
-        a.onended = null
-        a.onerror = null
-        a.onloadedmetadata = null
+        if (sourceRef.current === src) sourceRef.current = null
+        try {
+          src.onended = null
+          src.disconnect()
+        } catch {
+          // ignore
+        }
         resolve(ok)
       }
       const finishOk = () => finish(true)
-      releaseObjectUrl()
-      objectUrl.current = URL.createObjectURL(blob)
-      a.src = objectUrl.current
-      a.onended = finishOk
-      a.onerror = () => finish(false)
-      // Guard: the clip's real length once known, generous until then.
-      speakGuard.current = setTimeout(finishOk, 30_000)
-      a.onloadedmetadata = () => {
-        if (!Number.isFinite(a.duration)) return
-        if (speakGuard.current) clearTimeout(speakGuard.current)
-        speakGuard.current = setTimeout(() => {
-          try {
-            a.pause()
-          } catch {
-            // ignore
-          }
-          finishOk()
-        }, a.duration * 1000 + 2000)
-      }
+      src.buffer = buffer
+      src.connect(ctx.destination)
+      src.onended = finishOk
+      sourceRef.current = src
       speakResolve.current = finishOk
-      a.play().catch(() => finish(false))
+      // Guard by the clip's real length; if onended never fires, cut it so
+      // the mic never opens over the voice.
+      speakGuard.current = setTimeout(() => {
+        try {
+          src.stop()
+        } catch {
+          // ignore
+        }
+        finishOk()
+      }, buffer.duration * 1000 + 2000)
+      try {
+        src.start(0)
+      } catch {
+        finish(false)
+      }
     })
   }
 
@@ -674,23 +691,14 @@ export function InterviewMode({
       // ignore
     }
     // Browsers (iOS especially) only allow audio after a user gesture. Unlock
-    // inside this click: for the natural voice, play a silent clip through
-    // the <audio> element every question will reuse; for the browser voice,
-    // say a short line through speechSynthesis.
+    // inside this click: for the natural voice, resume the shared
+    // AudioContext and play one silent sample; for the browser voice, say a
+    // short line through speechSynthesis.
     naturalRef.current = naturalVoice
     if (naturalVoice) {
-      try {
-        const a = audioRef.current ?? new Audio()
-        audioRef.current = a
-        releaseObjectUrl()
-        objectUrl.current = silentWavUrl()
-        a.src = objectUrl.current
-        void a.play().catch(() => {
-          // unlock refused — questions will still try, then fall back
-        })
-      } catch {
-        naturalRef.current = false
-      }
+      const ctx = getAudioCtx()
+      if (ctx) unlockAudio(ctx)
+      else naturalRef.current = false
     } else if (!mutedRef.current && ttsAvailable()) {
       try {
         window.speechSynthesis.cancel()
@@ -813,23 +821,23 @@ export function InterviewMode({
     const stopped = stoppedRef
     const turnEpoch = epoch
     const guard = speakGuard
-    const audio = audioRef
-    const url = objectUrl
+    const source = sourceRef
     return () => {
       stopped.current = true
       turnEpoch.current++
       if (guard.current) clearTimeout(guard.current)
       if (ttsAvailable()) window.speechSynthesis.cancel()
-      const a = audio.current
-      if (a) {
+      const src = source.current
+      source.current = null
+      if (src) {
         try {
-          a.pause()
-          a.src = ""
+          src.onended = null
+          src.stop()
+          src.disconnect()
         } catch {
           // ignore
         }
       }
-      if (url.current) URL.revokeObjectURL(url.current)
       stopListening()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1012,10 +1020,26 @@ export function InterviewMode({
               )}
             </div>
             {showHint && phase === "listening" && (
-              <p className="text-xs text-muted-foreground">
-                Still here. Take your time — tap <strong>Done answering</strong> when you&apos;re
-                finished, or <strong>Repeat</strong> to hear the question again.
-              </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>
+                  Still here. Take your time — tap <strong>Done answering</strong> when
+                  you&apos;re finished. Not hearing you?
+                </span>
+                {/* Re-opens the mic in place, keeping anything already heard —
+                    the escape hatch for a recognizer that silently hung. */}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-6 gap-1 px-2 text-xs"
+                  onClick={() => {
+                    stopListening()
+                    startListening({ keep: true })
+                  }}
+                >
+                  <Mic className="size-3" /> Retry mic
+                </Button>
+              </div>
             )}
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={finishAnswer} className="gap-1">
