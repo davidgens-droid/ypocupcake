@@ -225,6 +225,9 @@ export function InterviewMode({
   // each question doesn't wait on a dead route.
   const sourceRef = useRef<AudioBufferSourceNode | null>(null)
   const naturalRef = useRef(naturalVoice)
+  // "Start answering" tapped while the question is still loading (fetch /
+  // decode) — there's nothing playing to cancel yet, so remember to skip it.
+  const skipSpeakRef = useRef(false)
   const retryRef = useRef<(() => void) | null>(null)
   // Bumped whenever the member takes over (stop / finish / repeat / restart /
   // cancel) so a turn that was mid-await can't resume and change the phase.
@@ -283,10 +286,21 @@ export function InterviewMode({
   }
 
   function cancelSpeech() {
+    skipSpeakRef.current = true
     if (ttsAvailable()) window.speechSynthesis.cancel()
     stopSource()
     // Not every browser fires onend after cancel() — resolve it ourselves.
     speakResolve.current?.()
+  }
+
+  /**
+   * The member already knows the question: cut the voice short and open the
+   * mic now. Resolving the pending speak() is enough — the turn continues
+   * into startListening() by itself.
+   */
+  function startAnswering() {
+    if (phase !== "speaking") return
+    cancelSpeech()
   }
 
   /** Natural voice via /api/tts, played through Web Audio. Resolves false if it couldn't play. */
@@ -308,14 +322,14 @@ export function InterviewMode({
     } catch {
       return false
     }
-    if (stoppedRef.current || mutedRef.current) return true
+    if (stoppedRef.current || mutedRef.current || skipSpeakRef.current) return true
     let buffer: AudioBuffer
     try {
       buffer = await ctx.decodeAudioData(bytes)
     } catch {
       return false
     }
-    if (stoppedRef.current || mutedRef.current) return true
+    if (stoppedRef.current || mutedRef.current || skipSpeakRef.current) return true
     if (ctx.state !== "running") {
       try {
         await ctx.resume()
@@ -366,6 +380,7 @@ export function InterviewMode({
   }
 
   function speak(text: string) {
+    skipSpeakRef.current = false
     if (mutedRef.current) return Promise.resolve()
     if (!naturalRef.current) return speakBrowser(text)
     return speakNatural(text).then((ok) => {
@@ -996,6 +1011,16 @@ export function InterviewMode({
               Say anything else you&apos;d like included — or say &ldquo;go ahead&rdquo; / tap{" "}
               <strong>Finish &amp; generate</strong>.
             </p>
+          )}
+          {phase === "speaking" && currentQuestion && (
+            <div className="mt-3 flex items-center gap-2">
+              <Button size="sm" onClick={startAnswering} className="gap-1">
+                <Mic className="size-4" /> Start answering
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Skip the rest of the question.
+              </span>
+            </div>
           )}
         </div>
 
