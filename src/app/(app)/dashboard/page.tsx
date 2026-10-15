@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { PatternCards } from "@/components/app/dashboard/pattern-cards"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, hasAny } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
 // Pattern cards are generated inside this page's render (behind Suspense) the
@@ -41,7 +42,7 @@ export default async function DashboardPage() {
   const [
     { data: nextMeeting },
     { data: openCommitments },
-    { data: roles },
+    roles,
   ] = await Promise.all([
     supabase
       .from("meetings")
@@ -60,11 +61,7 @@ export default async function DashboardPage() {
       .eq("status", "open")
       .order("due_date", { ascending: true, nullsFirst: false })
       .limit(5),
-    supabase
-      .from("roles")
-      .select("role_type")
-      .eq("member_id", me.id)
-      .eq("year", today.getFullYear()),
+    getMyRoles(me),
   ])
 
   const { data: existingUpdate } = nextMeeting
@@ -76,9 +73,7 @@ export default async function DashboardPage() {
         .maybeSingle()
     : { data: null }
 
-  const isModerator = (roles ?? []).some((r) =>
-    ["moderator", "assistant_moderator"].includes(r.role_type)
-  )
+  const isModerator = hasAny(roles, "moderator", "assistant_moderator")
 
   const greetingName = me.name.split(" ")[0]
 

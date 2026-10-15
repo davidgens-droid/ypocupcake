@@ -59,11 +59,26 @@ export function NotificationsBell({ memberId }: Props) {
 
   const unread = items.filter((n) => !n.read_at).length
 
+  // Only ever navigate within the app. The database refuses non-relative
+  // links too; this is the client's half of that promise. Parse rather than
+  // prefix-match: '/\evil.example' starts with '/' but resolves off-site.
+  function safeLink(link: string | null): string | null {
+    if (!link || typeof window === "undefined") return null
+    try {
+      const u = new URL(link, window.location.origin)
+      if (u.origin !== window.location.origin) return null
+      return u.pathname + u.search + u.hash
+    } catch {
+      return null
+    }
+  }
+
   function clickItem(n: Notification) {
     startTransition(async () => {
       if (!n.read_at) await markRead(n.id)
       setOpen(false)
-      if (n.link) router.push(n.link)
+      const to = safeLink(n.link)
+      if (to) router.push(to)
     })
   }
 
@@ -120,9 +135,9 @@ export function NotificationsBell({ memberId }: Props) {
           <ul className="max-h-80 overflow-auto divide-y">
             {items.map((n) => (
               <li key={n.id}>
-                {n.link ? (
+                {safeLink(n.link) ? (
                   <Link
-                    href={n.link}
+                    href={safeLink(n.link) ?? "/"}
                     onClick={(e) => {
                       e.preventDefault()
                       clickItem(n)

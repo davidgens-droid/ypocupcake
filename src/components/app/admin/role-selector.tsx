@@ -51,10 +51,14 @@ export function RoleSelector({
         fd.set("role_type", roleType)
         fd.set("year", String(year))
         fd.set("member_id", selected)
-        await setSingletonRole(fd)
+        const res = await setSingletonRole(fd)
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
         toast.success(`${label} updated.`)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Couldn't save.")
+      } catch {
+        toast.error("Couldn't save. Check your connection and try again.")
       }
     })
   }

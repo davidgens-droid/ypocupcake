@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { RunnerControls } from "@/components/app/meeting/runner-controls"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { canRunMeetings, getMyRoles } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import type { ExplorationFormatCode } from "@/lib/types/domain"
 
@@ -25,15 +26,8 @@ export default async function RunMeetingPage({
   const supabase = await createClient()
 
   // Verify caller is moderator/asst or admin
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const isMod = (roles ?? []).some((r) =>
-    ["moderator", "assistant_moderator"].includes(r.role_type)
-  )
-  if (!isMod && !me.is_admin) {
+  const roles = await getMyRoles(me)
+  if (!canRunMeetings(me, roles)) {
     redirect(`/meeting/${id}`)
   }
 
@@ -49,6 +43,7 @@ export default async function RunMeetingPage({
       .from("meetings")
       .select("id, scheduled_at, location, status")
       .eq("id", id)
+      .eq("forum_id", me.forum_id)
       .maybeSingle(),
     supabase.from("members").select("id, name"),
     supabase
@@ -57,6 +52,7 @@ export default async function RunMeetingPage({
         "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
       )
       .eq("meeting_id", id)
+      .eq("forum_id", me.forum_id)
       .order("started_at", { ascending: false }),
     supabase
       .from("parking_lot_items")
@@ -70,6 +66,7 @@ export default async function RunMeetingPage({
       .from("parking_lot_items")
       .select("id", { count: "exact", head: true })
       .eq("captured_meeting_id", id)
+      .eq("forum_id", me.forum_id)
       .eq("status", "captured"),
   ])
 

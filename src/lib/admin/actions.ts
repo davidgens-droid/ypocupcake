@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { canRunMeetings, getMyRoles } from "@/lib/auth/roles"
 import { forumLocalInputToISO } from "@/lib/dates"
 import { createClient } from "@/lib/supabase/server"
 
@@ -17,16 +18,8 @@ async function ensureAdmin() {
 async function ensureMeetingManager() {
   const me = await requireCurrentMember()
   if (me.is_admin) return me
-  const supabase = await createClient()
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const isMod = (roles ?? []).some((r) =>
-    ["moderator", "assistant_moderator"].includes(r.role_type)
-  )
-  if (!isMod) throw new Error("Admin or Moderator only.")
+  const roles = await getMyRoles(me)
+  if (!canRunMeetings(me, roles)) throw new Error("Admin or Moderator only.")
   return me
 }
 
@@ -88,18 +81,61 @@ export async function updateMember(formData: FormData) {
     is_admin: formData.get("is_admin") ?? undefined,
   })
 
+  // User sessions can no longer update identity columns on members (0017);
+  // admin edits go through the same-forum SECURITY DEFINER RPC, which can
+  // never touch forum_id / email / id and refuses to demote the last admin.
   const supabase = await createClient()
-  const { error } = await supabase
-    .from("members")
-    .update({
+  const { error } = await supabase.rpc("admin_update_member", {
+    p_member_id: parsed.id,
+    p_patch: {
       name: parsed.name,
-      birthday: parsed.birthday || null,
-      anniversary: parsed.anniversary || null,
+      birthday: parsed.birthday || "",
+      anniversary: parsed.anniversary || "",
       is_admin: parsed.is_admin === "on",
-    })
-    .eq("id", parsed.id)
-  if (error) throw new Error(error.message)
+    },
+  })
+  if (error) throw new Error(friendlyRpcError(error.message))
   revalidatePath("/admin/members")
+}
+
+export type ActionResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * Remove a member from the forum (access ends immediately; data is kept).
+ * Returns a result rather than throwing: production scrubs thrown Server
+ * Action messages, and "that would leave no admin" must be readable.
+ */
+export async function removeMember(memberId: string): Promise<ActionResult> {
+  await ensureAdmin()
+  const parsed = z.string().uuid().safeParse(memberId)
+  if (!parsed.success) return { ok: false, error: "Invalid member." }
+  const supabase = await createClient()
+  const { error } = await supabase.rpc("remove_member", { p_member_id: parsed.data })
+  if (error) return { ok: false, error: friendlyRpcError(error.message) }
+  revalidatePath("/admin/members")
+  revalidatePath("/forum/members")
+  return { ok: true }
+}
+
+export async function restoreMember(memberId: string): Promise<ActionResult> {
+  await ensureAdmin()
+  const parsed = z.string().uuid().safeParse(memberId)
+  if (!parsed.success) return { ok: false, error: "Invalid member." }
+  const supabase = await createClient()
+  const { error } = await supabase.rpc("restore_member", { p_member_id: parsed.data })
+  if (error) return { ok: false, error: friendlyRpcError(error.message) }
+  revalidatePath("/admin/members")
+  revalidatePath("/forum/members")
+  return { ok: true }
+}
+
+/** Map the RPCs' stable error codes to copy. */
+function friendlyRpcError(message: string): string {
+  if (message.includes("last_admin")) return "That would leave the forum with no admin."
+  if (message.includes("cannot_remove_self")) return "You can't remove yourself."
+  if (message.includes("member_not_in_forum")) return "That member isn't in your forum."
+  if (message.includes("not_admin")) return "Admins only."
+  return message
 }
 
 // ─── Roles ─────────────────────────────────────────────────────────────────
@@ -120,38 +156,53 @@ const roleSchema = z.object({
   year: z.coerce.number().int().min(2024).max(2100),
 })
 
-export async function setSingletonRole(formData: FormData) {
+export async function setSingletonRole(formData: FormData): Promise<ActionResult> {
   // Sets the single holder of moderator / assistant_moderator / czar for a year.
   const me = await ensureAdmin()
   const memberIdRaw = formData.get("member_id")
-  const parsed = roleSchema.parse({
+  const parsed = roleSchema.safeParse({
     member_id: memberIdRaw === "" ? null : memberIdRaw,
     role_type: formData.get("role_type"),
     year: formData.get("year"),
   })
+  if (!parsed.success) return { ok: false, error: "Invalid role assignment." }
 
   const supabase = await createClient()
+
+  // The composite FK (0018) already refuses a member from another forum;
+  // returned (not thrown) so the admin reads the reason in production.
+  if (parsed.data.member_id) {
+    const { data: target } = await supabase
+      .from("members")
+      .select("id")
+      .eq("id", parsed.data.member_id)
+      .eq("forum_id", me.forum_id)
+      .eq("status", "active")
+      .maybeSingle()
+    if (!target) return { ok: false, error: "That member isn't an active member of your forum." }
+  }
 
   // Clear any existing holder for this role/year/forum.
   const { error: delErr } = await supabase
     .from("roles")
     .delete()
     .eq("forum_id", me.forum_id)
-    .eq("role_type", parsed.role_type)
-    .eq("year", parsed.year)
-  if (delErr) throw new Error(delErr.message)
+    .eq("role_type", parsed.data.role_type)
+    .eq("year", parsed.data.year)
+  if (delErr) return { ok: false, error: "Couldn't update the role. Try again." }
 
-  if (parsed.member_id) {
+  if (parsed.data.member_id) {
     const { error: insErr } = await supabase.from("roles").insert({
       forum_id: me.forum_id,
-      member_id: parsed.member_id,
-      role_type: parsed.role_type,
-      year: parsed.year,
+      member_id: parsed.data.member_id,
+      role_type: parsed.data.role_type,
+      year: parsed.data.year,
     })
-    if (insErr) throw new Error(insErr.message)
+    if (insErr) return { ok: false, error: "Couldn't update the role. Try again." }
   }
 
   revalidatePath("/admin/roles")
+  return { ok: true }
 }
 
 // ─── Meetings ──────────────────────────────────────────────────────────────

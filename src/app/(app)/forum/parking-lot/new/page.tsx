@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { NewItemForm } from "@/components/app/parking-lot/new-item-form"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, hasAny, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
@@ -18,26 +19,20 @@ export default async function NewParkingLotItemPage({
   const supabase = await createClient()
   const { topic: prefilledTopic } = await searchParams
 
-  const [{ data: formatsRaw }, { data: rolesRaw }, { data: membersRaw }] =
+  const [{ data: formatsRaw }, roles, { data: membersRaw }] =
     await Promise.all([
       supabase
         .from("exploration_formats")
         .select(
           "code, category, display_name, default_minutes, short_description, moderator_instructions, source_attribution"
         ),
-      supabase
-        .from("roles")
-        .select("role_type")
-        .eq("member_id", me.id)
-        .eq("year", new Date().getFullYear()),
-      supabase.from("members").select("id, name").order("name"),
+      getMyRoles(me),
+      supabase.from("members").select("id, name").eq("status", "active").order("name"),
     ])
 
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isCzar = myRoles.includes("czar")
-  const isModerator =
-    myRoles.includes("moderator") || myRoles.includes("assistant_moderator")
-  const canSubmitOnBehalf = isCzar || isModerator || me.is_admin
+  const isCzar = hasAny(roles, "czar")
+  const isModerator = hasAny(roles, "moderator", "assistant_moderator")
+  const canSubmitOnBehalf = isParkingLotPrivileged(me, roles)
 
   const onBehalfLabel = isCzar
     ? "Czar"

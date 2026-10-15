@@ -32,6 +32,7 @@ export default async function MembersPage() {
           "id, name, email, photo_url, family, birthday, anniversary, is_admin, created_at"
         )
         .eq("forum_id", me.forum_id)
+        .eq("status", "active")
         .order("name"),
       supabase
         .from("roles")
@@ -64,9 +65,18 @@ export default async function MembersPage() {
       <section className="space-y-2">
         <ul className="grid gap-2 sm:grid-cols-2">
           {(members ?? []).map((m) => {
-            const family = m.family as
-              | { partner?: string; children?: string[] }
-              | null
+            // Stored as free-form JSON (admins can edit it); only render the
+            // shape we understand so a stray value can't take the roster down.
+            const rawFamily = m.family as { partner?: unknown; children?: unknown } | null
+            const family =
+              rawFamily && typeof rawFamily === "object"
+                ? {
+                    partner: typeof rawFamily.partner === "string" ? rawFamily.partner : undefined,
+                    children: Array.isArray(rawFamily.children)
+                      ? rawFamily.children.filter((c): c is string => typeof c === "string")
+                      : undefined,
+                  }
+                : null
             const memberRoles = rolesByMember.get(m.id) ?? []
             return (
               <li key={m.id}>

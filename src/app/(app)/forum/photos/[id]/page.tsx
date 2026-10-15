@@ -40,7 +40,8 @@ export default async function PhotoDetailPage({ params }: { params: Params }) {
         .order("created_at", { ascending: true }),
       supabase.storage
         .from("photos")
-        .createSignedUrl(photo.storage_path, 60 * 60),
+        // Signed URLs are bearer links; keep their life short.
+        .createSignedUrl(photo.storage_path, 10 * 60),
     ])
 
   const memberName = new Map((members ?? []).map((m) => [m.id, m.name]))

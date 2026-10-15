@@ -63,7 +63,6 @@ export async function createParkingLotItem(formData: FormData) {
     await notifyMember({
       memberId: submitterId,
       kind: "topic_added_on_behalf",
-      title: `${me.name} parked a topic for you`,
       detail: parsed.topic,
       link: `/forum/parking-lot/${data.id}`,
     })
@@ -84,7 +83,7 @@ const editItemSchema = z.object({
 })
 
 export async function updateParkingLotItem(formData: FormData) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const parsed = editItemSchema.parse({
     id: formData.get("id"),
     topic: formData.get("topic"),
@@ -109,6 +108,7 @@ export async function updateParkingLotItem(formData: FormData) {
       submitter_member_id: parsed.submitter_member_id,
     })
     .eq("id", parsed.id)
+    .eq("forum_id", me.forum_id)
 
   if (error) throw new Error(error.message)
 
@@ -122,7 +122,7 @@ export async function scheduleParkingLotItem(input: {
   itemId: string
   meetingId: string
 }) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const supabase = await createClient()
   // RLS handles permission (parking_lot_privileged_manage from migration 0011).
   const { error } = await supabase
@@ -132,6 +132,7 @@ export async function scheduleParkingLotItem(input: {
       scheduled_meeting_id: input.meetingId,
     })
     .eq("id", input.itemId)
+    .eq("forum_id", me.forum_id)
   if (error) throw new Error(error.message)
   revalidatePath("/forum/parking-lot")
   revalidatePath(`/forum/parking-lot/${input.itemId}`)
@@ -139,12 +140,13 @@ export async function scheduleParkingLotItem(input: {
 }
 
 export async function unscheduleParkingLotItem(itemId: string) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const supabase = await createClient()
   const { data: existing } = await supabase
     .from("parking_lot_items")
     .select("scheduled_meeting_id")
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
     .single()
   const prevMeetingId = existing?.scheduled_meeting_id ?? null
 
@@ -155,6 +157,7 @@ export async function unscheduleParkingLotItem(itemId: string) {
       scheduled_meeting_id: null,
     })
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
   if (error) throw new Error(error.message)
   revalidatePath("/forum/parking-lot")
   revalidatePath(`/forum/parking-lot/${itemId}`)
@@ -231,7 +234,7 @@ const updateCapturedSchema = z.object({
 export async function updateCapturedItem(
   input: z.infer<typeof updateCapturedSchema>
 ) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const parsed = updateCapturedSchema.parse(input)
   const supabase = await createClient()
 
@@ -239,6 +242,7 @@ export async function updateCapturedItem(
     .from("parking_lot_items")
     .select("captured_meeting_id")
     .eq("id", parsed.itemId)
+    .eq("forum_id", me.forum_id)
     .single()
 
   const tool_category = await categoryForFormat(supabase, parsed.exploration_format)
@@ -253,6 +257,7 @@ export async function updateCapturedItem(
       tool_category,
     })
     .eq("id", parsed.itemId)
+    .eq("forum_id", me.forum_id)
     .eq("status", "captured")
   if (error) throw new Error(error.message)
 
@@ -264,19 +269,21 @@ export async function updateCapturedItem(
 // ─── Post-meeting reconciliation (admin / moderator / asst-mod / czar) ──────
 /** Discard a captured item. RLS parking_lot_privileged_delete restricts this. */
 export async function deleteCapturedItem(itemId: string) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const supabase = await createClient()
 
   const { data: item } = await supabase
     .from("parking_lot_items")
     .select("captured_meeting_id")
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
     .single()
 
   const { error } = await supabase
     .from("parking_lot_items")
     .delete()
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
     .eq("status", "captured")
   if (error) throw new Error(error.message)
 
@@ -287,19 +294,21 @@ export async function deleteCapturedItem(itemId: string) {
 
 /** Keep a captured item — promote it to a normal parked item. */
 export async function parkCapturedItem(itemId: string) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const supabase = await createClient()
 
   const { data: item } = await supabase
     .from("parking_lot_items")
     .select("captured_meeting_id, context")
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
     .single()
 
   const { error } = await supabase
     .from("parking_lot_items")
     .update({ status: "parked", captured_meeting_id: null })
     .eq("id", itemId)
+    .eq("forum_id", me.forum_id)
     .eq("status", "captured")
   if (error) throw new Error(error.message)
 
@@ -313,6 +322,7 @@ export async function parkCapturedItem(itemId: string) {
       .from("parking_lot_items")
       .update({ context: body || null })
       .eq("id", itemId)
+      .eq("forum_id", me.forum_id)
       .eq("context", item.context)
   }
 
@@ -360,7 +370,7 @@ const mergeSchema = z.object({
 export async function mergeCapturedIntoParked(
   input: z.infer<typeof mergeSchema>
 ) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const { capturedId, targetId } = mergeSchema.parse(input)
   if (capturedId === targetId) throw new Error("Can't merge an item with itself.")
   const supabase = await createClient()
@@ -371,6 +381,7 @@ export async function mergeCapturedIntoParked(
       "id, topic, context, urgency, tool_category, exploration_format, captured_meeting_id, status"
     )
     .in("id", [capturedId, targetId])
+    .eq("forum_id", me.forum_id)
   if (fetchErr) throw new Error(fetchErr.message)
 
   const captured = (rows ?? []).find((r) => r.id === capturedId)
@@ -409,12 +420,14 @@ export async function mergeCapturedIntoParked(
       exploration_format: merged.exploration_format,
     })
     .eq("id", targetId)
+    .eq("forum_id", me.forum_id)
   if (updErr) throw new Error(updErr.message)
 
   const { error: delErr } = await supabase
     .from("parking_lot_items")
     .delete()
     .eq("id", capturedId)
+    .eq("forum_id", me.forum_id)
     .eq("status", "captured")
   if (delErr) throw new Error(delErr.message)
 
@@ -438,7 +451,7 @@ const markDiscussedSchema = z.object({
 export async function markParkingLotItemDiscussed(
   input: z.infer<typeof markDiscussedSchema>
 ) {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const parsed = markDiscussedSchema.parse(input)
   const supabase = await createClient()
 
@@ -447,6 +460,7 @@ export async function markParkingLotItemDiscussed(
     .from("parking_lot_items")
     .select("scheduled_meeting_id")
     .eq("id", parsed.itemId)
+    .eq("forum_id", me.forum_id)
     .single()
   const prevMeetingId = existing?.scheduled_meeting_id ?? null
 
@@ -460,6 +474,7 @@ export async function markParkingLotItemDiscussed(
       ...(takeaways ? { takeaways } : {}),
     })
     .eq("id", parsed.itemId)
+    .eq("forum_id", me.forum_id)
   if (error) throw new Error(error.message)
 
   revalidatePath("/forum/parking-lot")
@@ -475,6 +490,7 @@ export async function withdrawParkingLotItem(id: string) {
     .from("parking_lot_items")
     .update({ status: "withdrawn" })
     .eq("id", id)
+    .eq("forum_id", me.forum_id)
     .eq("submitter_member_id", me.id)
 
   if (error) throw new Error(error.message)
@@ -492,6 +508,7 @@ export async function reparkItem(id: string) {
       "topic, context, urgency, tool_category, exploration_format"
     )
     .eq("id", id)
+    .eq("forum_id", me.forum_id)
     .single()
 
   if (fetchErr) throw new Error(fetchErr.message)

@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EditItemForm } from "@/components/app/parking-lot/edit-item-form"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
@@ -19,7 +20,7 @@ export default async function EditParkingLotItemPage({
   const { id } = await params
   const supabase = await createClient()
 
-  const [{ data: item }, { data: formatsRaw }, { data: rolesRaw }, { data: membersRaw }] =
+  const [{ data: item }, { data: formatsRaw }, roles, { data: membersRaw }] =
     await Promise.all([
       supabase
         .from("parking_lot_items")
@@ -27,28 +28,20 @@ export default async function EditParkingLotItemPage({
           "id, topic, context, urgency, tool_category, exploration_format, submitter_member_id, status"
         )
         .eq("id", id)
+        .eq("forum_id", me.forum_id)
         .maybeSingle(),
       supabase
         .from("exploration_formats")
         .select(
           "code, category, display_name, default_minutes, short_description, moderator_instructions, source_attribution"
         ),
-      supabase
-        .from("roles")
-        .select("role_type")
-        .eq("member_id", me.id)
-        .eq("year", new Date().getFullYear()),
-      supabase.from("members").select("id, name").order("name"),
+      getMyRoles(me),
+      supabase.from("members").select("id, name").eq("status", "active").order("name"),
     ])
 
   if (!item) notFound()
 
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isPrivileged =
-    me.is_admin ||
-    myRoles.includes("moderator") ||
-    myRoles.includes("assistant_moderator") ||
-    myRoles.includes("czar")
+  const isPrivileged = isParkingLotPrivileged(me, roles)
 
   const isSubmitterAndEditable =
     item.submitter_member_id === me.id && item.status === "parked"

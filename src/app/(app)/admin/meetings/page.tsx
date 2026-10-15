@@ -34,6 +34,7 @@ export default async function AdminMeetingsPage() {
       .from("members")
       .select("id, name")
       .eq("forum_id", me.forum_id)
+      .eq("status", "active")
       .order("name"),
   ])
 

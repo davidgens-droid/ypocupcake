@@ -6,6 +6,7 @@ import { notFound } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { MemberMeetingView } from "@/components/app/meeting/member-meeting-view"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
 type Params = Promise<{ id: string }>
@@ -19,13 +20,14 @@ export default async function MeetingPage({ params }: { params: Params }) {
     { data: meeting },
     { data: rounds },
     { data: members },
-    { data: rolesRaw },
+    myRoles,
     { data: formats },
   ] = await Promise.all([
     supabase
       .from("meetings")
       .select("id, scheduled_at, location, status")
       .eq("id", id)
+      .eq("forum_id", me.forum_id)
       .maybeSingle(),
     supabase
       .from("meeting_rounds")
@@ -33,13 +35,10 @@ export default async function MeetingPage({ params }: { params: Params }) {
         "id, round_type, order_member_ids, current_index, started_at, ended_at, current_started_at, per_member_seconds, exploration_format, phase_index, phase_started_at, parking_lot_item_id"
       )
       .eq("meeting_id", id)
+      .eq("forum_id", me.forum_id)
       .order("started_at", { ascending: false }),
     supabase.from("members").select("id, name"),
-    supabase
-      .from("roles")
-      .select("role_type")
-      .eq("member_id", me.id)
-      .eq("year", new Date().getFullYear()),
+    getMyRoles(me),
     supabase
       .from("exploration_formats")
       .select("code, display_name, category"),
@@ -51,12 +50,7 @@ export default async function MeetingPage({ params }: { params: Params }) {
 
   // Privileged viewers (czar / moderator / asst-moderator / admin) can capture
   // parking-lot items for the presenter, even from the member view.
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isPrivileged =
-    me.is_admin ||
-    myRoles.includes("moderator") ||
-    myRoles.includes("assistant_moderator") ||
-    myRoles.includes("czar")
+  const isPrivileged = isParkingLotPrivileged(me, myRoles)
   const memberName = Object.fromEntries(
     (members ?? []).map((m) => [m.id, m.name])
   )

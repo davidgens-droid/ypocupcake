@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { canRunMeetings, getMyRoles } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 import {
   getCurrentPhase,
@@ -14,15 +15,8 @@ import type { ExplorationFormatCode } from "@/lib/types/domain"
 async function ensureMod() {
   const me = await requireCurrentMember()
   const supabase = await createClient()
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const isModerator = (roles ?? []).some((r) =>
-    ["moderator", "assistant_moderator"].includes(r.role_type)
-  )
-  if (!isModerator && !me.is_admin) {
+  const roles = await getMyRoles(me)
+  if (!canRunMeetings(me, roles)) {
     throw new Error("Moderator-only action.")
   }
   return { me, supabase }
@@ -67,11 +61,12 @@ function moveToSlot(order: string[], slot: number, memberId: string) {
 }
 
 export async function startMeeting(meetingId: string) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { error } = await supabase
     .from("meetings")
     .update({ status: "in_progress" })
     .eq("id", meetingId)
+    .eq("forum_id", me.forum_id)
   if (error) throw new Error(error.message)
   revalidatePath(`/meeting/${meetingId}`)
   revalidatePath(`/meeting/${meetingId}/run`)
@@ -90,13 +85,17 @@ const startRoundSchema = z.object({
 })
 
 export async function startRound(input: z.infer<typeof startRoundSchema>) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const parsed = startRoundSchema.parse(input)
 
   // Everyone in the forum is assumed to present — the round is no longer gated
   // on attendance / "marked ready". The moderator chooses who actually goes
   // (and can simply not call on anyone who's absent).
-  const { data: all } = await supabase.from("members").select("id")
+  const { data: all } = await supabase
+    .from("members")
+    .select("id")
+    .eq("forum_id", me.forum_id)
+    .eq("status", "active")
   const memberIds = (all ?? []).map((m) => m.id)
 
   const order = shuffle(memberIds)
@@ -144,7 +143,7 @@ const revealSchema = z.object({
  * up.
  */
 export async function revealPresenter(input: z.infer<typeof revealSchema>) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const parsed = revealSchema.parse(input)
 
   const { data: round, error } = await supabase
@@ -153,6 +152,7 @@ export async function revealPresenter(input: z.infer<typeof revealSchema>) {
       "id, meeting_id, order_member_ids, current_index, current_started_at, ended_at"
     )
     .eq("id", parsed.roundId)
+    .eq("forum_id", me.forum_id)
     .single()
   if (error || !round) throw new Error("Round not found.")
   if (round.ended_at) throw new Error("Round already ended.")
@@ -187,13 +187,14 @@ const advanceRoundSchema = z.object({
  * random) in a single step. Ends the round when no one is left.
  */
 export async function advanceRound(input: z.infer<typeof advanceRoundSchema>) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const parsed = advanceRoundSchema.parse(input)
 
   const { data: round, error: fetchErr } = await supabase
     .from("meeting_rounds")
     .select("id, meeting_id, current_index, order_member_ids, ended_at")
     .eq("id", parsed.roundId)
+    .eq("forum_id", me.forum_id)
     .single()
   if (fetchErr) throw new Error(fetchErr.message)
 
@@ -227,11 +228,12 @@ export async function advanceRound(input: z.infer<typeof advanceRoundSchema>) {
 }
 
 export async function adjustTimer(roundId: string, deltaSeconds: number) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { data: round } = await supabase
     .from("meeting_rounds")
     .select("meeting_id, per_member_seconds")
     .eq("id", roundId)
+    .eq("forum_id", me.forum_id)
     .single()
   if (!round) return
   const next = Math.max(15, (round.per_member_seconds ?? 300) + deltaSeconds)
@@ -276,7 +278,8 @@ type ReorderableRound = {
 
 async function loadReorderableRound(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  roundId: string
+  roundId: string,
+  forumId: string
 ): Promise<
   | { ok: true; round: ReorderableRound; head: string[]; tail: string[] }
   | { ok: false; error: string }
@@ -285,6 +288,7 @@ async function loadReorderableRound(
     .from("meeting_rounds")
     .select("id, meeting_id, order_member_ids, current_index, current_started_at, ended_at")
     .eq("id", roundId)
+    .eq("forum_id", forumId)
     .single()
   if (error || !round) return { ok: false, error: "That round no longer exists." }
   if (round.ended_at) return { ok: false, error: "That round has already ended." }
@@ -339,9 +343,9 @@ const reorderSchema = z.object({
 export async function reorderRound(
   input: z.infer<typeof reorderSchema>
 ): Promise<OrderResult> {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const parsed = reorderSchema.parse(input)
-  const loaded = await loadReorderableRound(supabase, parsed.roundId)
+  const loaded = await loadReorderableRound(supabase, parsed.roundId, me.forum_id)
   if (!loaded.ok) return loaded
 
   const next = parsed.orderMemberIds
@@ -356,9 +360,9 @@ export async function reorderRound(
 
 /** Re-randomise only the members who haven't presented yet. */
 export async function shuffleRemaining(input: { roundId: string }): Promise<OrderResult> {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const roundId = z.string().uuid().parse(input.roundId)
-  const loaded = await loadReorderableRound(supabase, roundId)
+  const loaded = await loadReorderableRound(supabase, roundId, me.forum_id)
   if (!loaded.ok) return loaded
   if (loaded.tail.length < 2) return { ok: true }
   return writeTail(supabase, loaded.round, loaded.head, shuffle(loaded.tail))
@@ -370,11 +374,12 @@ export async function shuffleRemaining(input: { roundId: string }): Promise<Orde
  * resets the linked parking-lot item back to "parked" so it can be re-run.
  */
 export async function cancelActiveRound(meetingId: string) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { data: active } = await supabase
     .from("meeting_rounds")
     .select("id, round_type, parking_lot_item_id")
     .eq("meeting_id", meetingId)
+    .eq("forum_id", me.forum_id)
     .is("ended_at", null)
     .order("started_at", { ascending: false })
     .limit(1)
@@ -404,20 +409,26 @@ export async function cancelActiveRound(meetingId: string) {
  * any parking-lot items that were scheduled into this meeting.
  */
 export async function resetMeeting(meetingId: string) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
 
   await supabase
     .from("parking_lot_items")
     .update({ status: "parked", scheduled_meeting_id: null })
     .eq("scheduled_meeting_id", meetingId)
+    .eq("forum_id", me.forum_id)
     .eq("status", "scheduled")
 
-  await supabase.from("meeting_rounds").delete().eq("meeting_id", meetingId)
+  await supabase
+    .from("meeting_rounds")
+    .delete()
+    .eq("meeting_id", meetingId)
+    .eq("forum_id", me.forum_id)
 
   await supabase
     .from("meetings")
     .update({ status: "upcoming", closed_at: null })
     .eq("id", meetingId)
+    .eq("forum_id", me.forum_id)
 
   revalidatePath(`/meeting/${meetingId}/run`)
   revalidatePath(`/meeting/${meetingId}`)
@@ -425,16 +436,18 @@ export async function resetMeeting(meetingId: string) {
 }
 
 export async function endRound(roundId: string) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { data: round } = await supabase
     .from("meeting_rounds")
     .select("meeting_id")
     .eq("id", roundId)
+    .eq("forum_id", me.forum_id)
     .single()
   await supabase
     .from("meeting_rounds")
     .update({ ended_at: new Date().toISOString() })
     .eq("id", roundId)
+    .eq("forum_id", me.forum_id)
   if (round) {
     revalidatePath(`/meeting/${round.meeting_id}`)
     revalidatePath(`/meeting/${round.meeting_id}/run`)
@@ -448,12 +461,13 @@ export async function startExploration(input: {
   meetingId: string
   parkingLotItemId: string
 }) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
 
   const { data: item, error: itemErr } = await supabase
     .from("parking_lot_items")
     .select("id, submitter_member_id, exploration_format, topic")
     .eq("id", input.parkingLotItemId)
+    .eq("forum_id", me.forum_id)
     .single()
   if (itemErr || !item) throw new Error("Parking lot item not found.")
 
@@ -464,7 +478,11 @@ export async function startExploration(input: {
   }
 
   // All forum members participate (assumed present, regardless of "ready").
-  const { data: all } = await supabase.from("members").select("id")
+  const { data: all } = await supabase
+    .from("members")
+    .select("id")
+    .eq("forum_id", me.forum_id)
+    .eq("status", "active")
   const memberIds = (all ?? []).map((m) => m.id)
 
   const phase0 = phases[0]
@@ -516,7 +534,7 @@ const advanceExplorationSchema = z.object({
 export async function advanceExploration(
   input: z.infer<typeof advanceExplorationSchema>
 ) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { roundId, nextMemberId } = advanceExplorationSchema.parse(input)
 
   const { data: round, error: fetchErr } = await supabase
@@ -525,6 +543,7 @@ export async function advanceExploration(
       "id, meeting_id, exploration_format, parking_lot_item_id, phase_index, current_index, current_started_at, order_member_ids"
     )
     .eq("id", roundId)
+    .eq("forum_id", me.forum_id)
     .single()
   if (fetchErr || !round) throw new Error("Round not found.")
 
@@ -579,7 +598,11 @@ export async function advanceExploration(
       .select("submitter_member_id")
       .eq("id", round.parking_lot_item_id ?? "")
       .maybeSingle()
-    const { data: all } = await supabase.from("members").select("id")
+    const { data: all } = await supabase
+      .from("members")
+      .select("id")
+      .eq("forum_id", me.forum_id)
+      .eq("status", "active")
     const memberIds = (all ?? []).map((m) => m.id)
     nextOrder = computeRoundOrder(
       memberIds,
@@ -643,11 +666,12 @@ function computeRoundOrder(
 }
 
 export async function closeMeeting(meetingId: string) {
-  const { supabase } = await ensureMod()
+  const { me, supabase } = await ensureMod()
   const { error } = await supabase
     .from("meetings")
     .update({ status: "closed", closed_at: new Date().toISOString() })
     .eq("id", meetingId)
+    .eq("forum_id", me.forum_id)
   if (error) throw new Error(error.message)
   revalidatePath(`/meeting/${meetingId}`)
   revalidatePath(`/meeting/${meetingId}/run`)

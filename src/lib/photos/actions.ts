@@ -18,6 +18,13 @@ export async function recordPhoto(input: z.infer<typeof recordSchema>) {
   const me = await requireCurrentMember()
   const parsed = recordSchema.parse(input)
 
+  // The bucket's own policies already scope objects to <forum>/<member>/; the
+  // row must point at a path under the caller's own prefix too, or a row
+  // could reference an object it doesn't own.
+  if (!parsed.storage_path.startsWith(`${me.forum_id}/${me.id}/`)) {
+    throw new Error("Not allowed.")
+  }
+
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("photos")
@@ -47,6 +54,7 @@ export async function deletePhoto(formData: FormData) {
     .from("photos")
     .select("id, uploader_member_id, storage_path")
     .eq("id", id)
+    .eq("forum_id", me.forum_id)
     .single()
 
   if (fetchErr || !photo || photo.uploader_member_id !== me.id) {
@@ -54,7 +62,11 @@ export async function deletePhoto(formData: FormData) {
   }
 
   await supabase.storage.from("photos").remove([photo.storage_path])
-  const { error: delErr } = await supabase.from("photos").delete().eq("id", id)
+  const { error: delErr } = await supabase
+    .from("photos")
+    .delete()
+    .eq("id", id)
+    .eq("forum_id", me.forum_id)
   if (delErr) throw new Error(delErr.message)
 
   revalidatePath("/forum/photos")
@@ -116,12 +128,12 @@ export async function addComment(formData: FormData) {
     .from("photos")
     .select("uploader_member_id, caption")
     .eq("id", parsed.photo_id)
+    .eq("forum_id", me.forum_id)
     .single()
   if (photo && photo.uploader_member_id !== me.id) {
     await notifyMember({
       memberId: photo.uploader_member_id,
       kind: "photo_comment",
-      title: `${me.name} commented on your photo`,
       detail: parsed.body.slice(0, 140),
       link: `/forum/photos/${parsed.photo_id}`,
     })

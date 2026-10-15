@@ -11,6 +11,7 @@ import {
 } from "@/components/app/parking-lot/status-pill"
 import { MarkDiscussedButton } from "@/components/app/parking-lot/mark-discussed-button"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
 const STATUS_TABS = [
@@ -37,7 +38,7 @@ export default async function ParkingLotPage({
     { data: formats },
     { data: members },
     { data: counts },
-    { data: rolesRaw },
+    roles,
   ] = await Promise.all([
     supabase
       .from("parking_lot_items")
@@ -53,20 +54,11 @@ export default async function ParkingLotPage({
     supabase
       .from("parking_lot_items")
       .select("status", { count: "exact", head: false }),
-    supabase
-      .from("roles")
-      .select("role_type")
-      .eq("member_id", me.id)
-      .eq("year", new Date().getFullYear()),
+    getMyRoles(me),
   ])
 
   // Admin / moderator / asst-moderator / czar can mark items discussed.
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isPrivileged =
-    me.is_admin ||
-    myRoles.includes("moderator") ||
-    myRoles.includes("assistant_moderator") ||
-    myRoles.includes("czar")
+  const isPrivileged = isParkingLotPrivileged(me, roles)
 
   const formatLabel = new Map(
     (formats ?? []).map((f) => [

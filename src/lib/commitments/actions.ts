@@ -29,6 +29,7 @@ export async function updateCommitment(formData: FormData) {
       notes: parsed.notes.trim() || null,
     })
     .eq("id", parsed.id)
+    .eq("forum_id", me.forum_id)
     .eq("member_id", me.id)
 
   if (error) throw new Error(error.message)

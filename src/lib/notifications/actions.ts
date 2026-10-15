@@ -60,15 +60,17 @@ export async function markAllRead() {
   revalidatePath("/")
 }
 
+export type NotificationKind = "topic_added_on_behalf" | "photo_comment"
+
 /**
- * Insert a notification for another member. Uses the SECURITY DEFINER RPC so
- * the actor doesn't need write access on the recipient's row. Safe to call
- * from any server action run by an authenticated user.
+ * Insert a notification for another member of the caller's forum. The
+ * SECURITY DEFINER RPC composes the title from the CALLER's own name and the
+ * kind (a caller can't put someone else's name on it), refuses recipients
+ * outside the forum, and only accepts relative links.
  */
 export async function notifyMember(args: {
   memberId: string
-  kind: string
-  title: string
+  kind: NotificationKind
   detail?: string
   link?: string
 }) {
@@ -76,7 +78,6 @@ export async function notifyMember(args: {
   await supabase.rpc("create_notification", {
     p_member_id: args.memberId,
     p_kind: args.kind,
-    p_title: args.title,
     p_detail: args.detail ?? null,
     p_link: args.link ?? null,
   })

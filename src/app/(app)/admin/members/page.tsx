@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { MemberStatusButton } from "@/components/app/admin/member-status-button"
 import { createInvite, deleteInvite } from "@/lib/admin/actions"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
@@ -18,10 +19,11 @@ export default async function AdminMembersPage() {
   }
   const supabase = await createClient()
 
-  const [{ data: members }, { data: invites }] = await Promise.all([
+  const [{ data: allMembers }, { data: invites }] = await Promise.all([
     supabase
       .from("members")
-      .select("id, name, email, birthday, anniversary, is_admin, created_at")
+      .select("id, name, email, birthday, anniversary, is_admin, status, created_at")
+      .eq("forum_id", me.forum_id)
       .order("name"),
     supabase
       .from("member_invites")
@@ -29,16 +31,19 @@ export default async function AdminMembersPage() {
       .order("created_at", { ascending: false }),
   ])
 
+  const members = (allMembers ?? []).filter((m) => m.status !== "removed")
+  const removed = (allMembers ?? []).filter((m) => m.status === "removed")
+
   return (
     <div className="space-y-6">
       <section className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="font-heading text-base font-semibold">
-            Members ({members?.length ?? 0})
+            Members ({members.length})
           </h2>
         </div>
         <ul className="space-y-2">
-          {(members ?? []).map((m) => (
+          {members.map((m) => (
             <li key={m.id}>
               <Card>
                 <CardContent className="flex items-start justify-between gap-2 py-3 text-sm">
@@ -67,12 +72,45 @@ export default async function AdminMembersPage() {
                       )}
                     </p>
                   </div>
+                  {m.id !== me.id && (
+                    <MemberStatusButton memberId={m.id} name={m.name} mode="remove" />
+                  )}
                 </CardContent>
               </Card>
             </li>
           ))}
         </ul>
       </section>
+
+      {removed.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="font-heading text-base font-semibold">
+            Removed ({removed.length})
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            No longer have access. Their updates and history are kept and stay
+            private to them. Restore to let them back in.
+          </p>
+          <ul className="space-y-2">
+            {removed.map((m) => (
+              <li key={m.id}>
+                <Card>
+                  <CardContent className="flex items-center justify-between gap-2 py-3 text-sm">
+                    <div className="space-y-0.5">
+                      <p className="font-medium text-muted-foreground">{m.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <Mail className="mr-1 inline size-3" />
+                        {m.email}
+                      </p>
+                    </div>
+                    <MemberStatusButton memberId={m.id} name={m.name} mode="restore" />
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-2">
         <h2 className="font-heading text-base font-semibold">

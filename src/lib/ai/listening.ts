@@ -8,6 +8,7 @@ import { z } from "zod"
 
 import { AI_MODEL } from "@/lib/ai/model"
 import type { CurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import {
   LISTENING_MAX_CHARS,
   LISTENING_NOTE,
@@ -80,17 +81,8 @@ export async function extractParkingLotTopics(
 
   // Same roles that may live-capture (the insert's RLS enforces this too, but
   // the AI call happens first — don't let an unprivileged caller spend tokens).
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const privileged =
-    me.is_admin ||
-    (roles ?? []).some((r) =>
-      ["moderator", "assistant_moderator", "czar"].includes(r.role_type)
-    )
-  if (!privileged) {
+  const roles = await getMyRoles(me)
+  if (!isParkingLotPrivileged(me, roles)) {
     return { ok: false, error: "Only the moderator, assistant moderator, czar or an admin can use listening mode." }
   }
 

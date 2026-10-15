@@ -1,8 +1,8 @@
 import { ForumSubNav } from "@/components/app/nav/forum-sub-nav"
 import { requireCurrentMember } from "@/lib/auth/current-member"
-import { createClient } from "@/lib/supabase/server"
+import { getMyRoles, hasAny, type RoleType } from "@/lib/auth/roles"
 
-const QOL_ROLES = ["moderator", "assistant_moderator", "technology"]
+const QOL_ROLES: RoleType[] = ["moderator", "assistant_moderator", "technology"]
 
 export default async function ForumLayout({
   children,
@@ -10,15 +10,8 @@ export default async function ForumLayout({
   children: React.ReactNode
 }) {
   const me = await requireCurrentMember()
-  const supabase = await createClient()
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const showQolHistory = (roles ?? []).some((r) =>
-    QOL_ROLES.includes(r.role_type)
-  )
+  const roles = await getMyRoles(me)
+  const showQolHistory = hasAny(roles, ...QOL_ROLES)
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">

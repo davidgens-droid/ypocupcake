@@ -9,6 +9,7 @@ import {
 } from "@/components/app/parking-lot/parking-lot-review"
 import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
 type Params = Promise<{ id: string }>
@@ -27,17 +28,8 @@ export default async function ParkingLotReviewPage({
   const supabase = await createClient()
 
   // Privileged only — moderator / assistant_moderator / czar / admin.
-  const { data: rolesRaw } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isPrivileged =
-    me.is_admin ||
-    myRoles.includes("moderator") ||
-    myRoles.includes("assistant_moderator") ||
-    myRoles.includes("czar")
+  const myRoles = await getMyRoles(me)
+  const isPrivileged = isParkingLotPrivileged(me, myRoles)
   if (!isPrivileged) redirect(`/meeting/${id}`)
 
   const [
@@ -51,6 +43,7 @@ export default async function ParkingLotReviewPage({
       .from("meetings")
       .select("id, scheduled_at, location, status")
       .eq("id", id)
+      .eq("forum_id", me.forum_id)
       .maybeSingle(),
     supabase
       .from("parking_lot_items")
@@ -59,6 +52,7 @@ export default async function ParkingLotReviewPage({
       )
       .eq("status", "captured")
       .eq("captured_meeting_id", id)
+      .eq("forum_id", me.forum_id)
       .order("created_at", { ascending: true }),
     supabase
       .from("parking_lot_items")

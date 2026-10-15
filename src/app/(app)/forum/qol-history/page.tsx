@@ -2,9 +2,10 @@ import { redirect } from "next/navigation"
 
 import { QolHistory, type QolRow } from "@/components/app/forum/qol-history"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, hasAny, type RoleType } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
-const ALLOWED_ROLES = ["moderator", "assistant_moderator", "technology"]
+const ALLOWED_ROLES: RoleType[] = ["moderator", "assistant_moderator", "technology"]
 
 export default async function QolHistoryPage() {
   const me = await requireCurrentMember()
@@ -12,12 +13,8 @@ export default async function QolHistoryPage() {
 
   // Gate: moderator / assistant moderator / technology only. (The RPC also
   // enforces this server-side, so it's defence in depth.)
-  const { data: roles } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const allowed = (roles ?? []).some((r) => ALLOWED_ROLES.includes(r.role_type))
+  const roles = await getMyRoles(me)
+  const allowed = hasAny(roles, ...ALLOWED_ROLES)
   if (!allowed) redirect("/forum/parking-lot")
 
   const { data, error } = await supabase.rpc("forum_qol_history")

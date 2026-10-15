@@ -8,7 +8,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
-const SIGNED_URL_TTL_SECONDS = 60 * 60 // 1 hour
+// Signed URLs are bearer links, but the grid lazy-loads tiles as the member
+// scrolls, so they must outlive a page left open through a meeting.
+const SIGNED_URL_TTL_SECONDS = 60 * 60
 
 export default async function PhotoGalleryPage() {
   await requireCurrentMember()

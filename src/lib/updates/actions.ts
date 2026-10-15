@@ -76,6 +76,7 @@ export async function finalizeUpdate({
     const { data: existing } = await supabase
       .from("parking_lot_items")
       .select("id")
+      .eq("forum_id", me.forum_id)
       .eq("submitter_member_id", me.id)
       .eq("topic", parsed.topic.text.trim())
       .eq("status", "parked")
@@ -101,6 +102,7 @@ export async function finalizeUpdate({
     const { data: existing } = await supabase
       .from("commitments")
       .select("id")
+      .eq("forum_id", me.forum_id)
       .eq("member_id", me.id)
       .eq("meeting_id", meetingId)
       .eq("text", parsed.goal.text.trim())

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation"
 
 import { AdminSubNav } from "@/components/app/nav/admin-sub-nav"
 import { requireCurrentMember } from "@/lib/auth/current-member"
-import { createClient } from "@/lib/supabase/server"
+import { canRunMeetings, getMyRoles } from "@/lib/auth/roles"
 
 export default async function AdminLayout({
   children,
@@ -15,15 +15,8 @@ export default async function AdminLayout({
   // Admin = full access. Moderator/Asst Mod = Calendar (meetings) only.
   let isMeetingManager = me.is_admin
   if (!isMeetingManager) {
-    const supabase = await createClient()
-    const { data: roles } = await supabase
-      .from("roles")
-      .select("role_type")
-      .eq("member_id", me.id)
-      .eq("year", new Date().getFullYear())
-    isMeetingManager = (roles ?? []).some((r) =>
-      ["moderator", "assistant_moderator"].includes(r.role_type)
-    )
+    const roles = await getMyRoles(me)
+    isMeetingManager = canRunMeetings(me, roles)
   }
 
   if (!me.is_admin && !isMeetingManager) {

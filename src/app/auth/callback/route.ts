@@ -7,12 +7,6 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const next = searchParams.get("next") ?? "/dashboard"
 
-  // Helpful for debugging email-template / flow mismatches.
-  console.log(
-    "[auth/callback] received params:",
-    Object.fromEntries(searchParams)
-  )
-
   // Supabase may bounce back with its own error (e.g. otp_expired). Surface it.
   const supaError = searchParams.get("error_code") ?? searchParams.get("error")
   if (supaError) {

@@ -83,6 +83,7 @@ export default async function AdminRolesPage() {
       .from("members")
       .select("id, name")
       .eq("forum_id", me.forum_id)
+      .eq("status", "active")
       .order("name"),
     supabase
       .from("roles")

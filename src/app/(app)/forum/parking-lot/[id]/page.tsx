@@ -25,6 +25,7 @@ import { ScheduleControl } from "@/components/app/parking-lot/schedule-control"
 import { MarkDiscussedButton } from "@/components/app/parking-lot/mark-discussed-button"
 import { formatMeeting } from "@/lib/dates"
 import { requireCurrentMember } from "@/lib/auth/current-member"
+import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
 import { createClient } from "@/lib/supabase/server"
 
 type Params = Promise<{ id: string }>
@@ -50,6 +51,7 @@ export default async function ParkingLotItemPage({
         "id, topic, context, urgency, tool_category, exploration_format, status, submitter_member_id, added_by_member_id, created_at, presented_at, takeaways, scheduled_meeting_id"
       )
       .eq("id", id)
+      .eq("forum_id", me.forum_id)
       .maybeSingle(),
     supabase
       .from("exploration_formats")
@@ -83,17 +85,8 @@ export default async function ParkingLotItemPage({
   const isClosed = item.status === "presented" || item.status === "archived"
 
   // Privileged roles can edit any item at any status.
-  const { data: rolesRaw } = await supabase
-    .from("roles")
-    .select("role_type")
-    .eq("member_id", me.id)
-    .eq("year", new Date().getFullYear())
-  const myRoles = (rolesRaw ?? []).map((r) => r.role_type)
-  const isPrivileged =
-    me.is_admin ||
-    myRoles.includes("moderator") ||
-    myRoles.includes("assistant_moderator") ||
-    myRoles.includes("czar")
+  const roles = await getMyRoles(me)
+  const isPrivileged = isParkingLotPrivileged(me, roles)
   const canEdit = isPrivileged || isEditable
 
   const withdraw = async () => {
