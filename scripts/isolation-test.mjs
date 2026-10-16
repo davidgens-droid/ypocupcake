@@ -64,6 +64,8 @@ function ok(name, cond, detail = "") {
   else { fail++; failures.push(name); console.log(`FAIL  ${name}${detail ? "  — " + detail : ""}`) }
 }
 const isRejected = (res) => !!res.error
+/** Rejected with the given stable error code (the RPCs raise e.g. 'not_admin'). */
+const codeIs = (res, code) => isRejected(res) && (res.error?.message ?? "").includes(code)
 
 // ─── 1. reset + migrate ──────────────────────────────────────────────────────
 async function resetAndMigrate() {
@@ -85,8 +87,10 @@ async function resetAndMigrate() {
   // ("Use the Storage API instead"), so the bucket is emptied through the
   // API. The bucket itself stays: 0004 creates it with `on conflict do
   // nothing`, and deleting it right after emptying races the async cleanup.
-  const emptied = await admin.storage.emptyBucket("photos")
-  if (emptied.error && !/not found/i.test(emptied.error.message)) throw new Error(`emptyBucket: ${emptied.error.message}`)
+  for (const bucket of ["photos", "charters"]) {
+    const emptied = await admin.storage.emptyBucket(bucket)
+    if (emptied.error && !/not found/i.test(emptied.error.message)) throw new Error(`emptyBucket ${bucket}: ${emptied.error.message}`)
+  }
   // Remove auth users from previous runs.
   const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 })
   for (const u of list?.users ?? []) if (u.email?.endsWith("@isolation.test")) await admin.auth.admin.deleteUser(u.id)
@@ -325,6 +329,37 @@ async function assertions(F) {
   ok("12.6 download of another forum's object is refused", !!dl.error)
   const ls = await A.member.client.storage.from("photos").list(`${B.id}/${B.member.id}`)
   ok("12.6 listing another forum's prefix returns nothing", !!ls.error || (ls.data ?? []).length === 0)
+  // Charter documents: the forum's admins write under the forum's prefix; its members read; nobody else anything.
+  // (The bucket allow-lists MIME types, and supabase-js sends a Blob's own type.)
+  const txt = { contentType: "text/plain" }
+  const textBlob = (s) => new Blob([s], { type: "text/plain" })
+  const ch1 = await A.member.client.storage.from("charters").upload(`${A.id}/${randomUUID()}.txt`, textBlob("norms"), txt)
+  ok("12.6 a plain member cannot upload a charter document", !!ch1.error)
+  const ch2 = await A.admin.client.storage.from("charters").upload(`${B.id}/${randomUUID()}.txt`, textBlob("norms"), txt)
+  ok("12.6 an admin cannot upload a charter document under another forum's prefix", !!ch2.error)
+  const charterPath = `${A.id}/${randomUUID()}.txt`
+  const ch3 = await A.admin.client.storage.from("charters").upload(charterPath, textBlob("our norms"), txt)
+  ok("12.6 (control) the forum's admin can upload a charter document", !ch3.error, ch3.error?.message)
+  const ch4 = await B.member.client.storage.from("charters").createSignedUrl(charterPath, 60)
+  ok("12.6 another forum's member cannot open our charter document", !!ch4.error)
+  const ch5 = await A.member.client.storage.from("charters").createSignedUrl(charterPath, 60)
+  ok("12.6 (control) our own member can open the charter document", !ch5.error && !!ch5.data?.signedUrl, ch5.error?.message)
+  const ch6 = await B.admin.client.storage.from("charters").remove([charterPath])
+  const ch6check = await A.admin.client.storage.from("charters").createSignedUrl(charterPath, 60)
+  ok("12.6 another forum's admin cannot delete our charter document", !!ch6.error || (!ch6check.error && !!ch6check.data?.signedUrl), ch6.error?.message)
+  const doc = { path: charterPath, name: "Norms.txt", size: 9, type: "text/plain" }
+  const sd1 = await A.member.client.rpc("set_charter_document", { p_document: doc })
+  ok("12.6 a plain member cannot record a charter document", codeIs(sd1, "not_admin"), sd1.error?.message)
+  const sd2 = await B.admin.client.rpc("set_charter_document", { p_document: doc })
+  ok("12.6 another forum's admin cannot record our object as their charter", codeIs(sd2, "invalid_document"), sd2.error?.message)
+  const sd3 = await A.admin.client.rpc("set_charter_document", { p_document: { ...doc, path: `${A.id}/${randomUUID()}.txt` } })
+  ok("12.6 a charter record must point at a real upload", codeIs(sd3, "document_not_found"), sd3.error?.message)
+  const sd4 = await A.admin.client.rpc("set_charter_document", { p_document: doc })
+  const sd4check = await admin.from("forums").select("settings").eq("id", A.id).single()
+  ok("12.6 (control) the forum's admin records the charter document", !sd4.error && sd4check.data?.settings?.charter_document?.path === charterPath && sd4check.data?.settings?.charter_document?.name === "Norms.txt", sd4.error?.message ?? JSON.stringify(sd4check.data?.settings))
+  const sd5 = await A.admin.client.rpc("set_charter_document", { p_document: null })
+  const sd5check = await admin.from("forums").select("settings").eq("id", A.id).single()
+  ok("12.6 (control) ...and can remove it again", !sd5.error && sd5check.data?.settings?.charter_document === undefined, sd5.error?.message)
 
   // §12.7 — realtime DELETE events carry only the PK
   const ri = await pg.query(`select relname, relreplident from pg_class where relname in ('meetings','meeting_rounds','attendees','notifications')`)
@@ -400,7 +435,6 @@ async function assertions(F) {
   ok("12.15 anonymous caller cannot call forum_ai_calls_today", isRejected(ai3))
 
   // §12.10 — onboarding: one forum per account; links expire/revoke/exhaust; peek reveals only the name
-  const codeIs = (res, code) => isRejected(res) && (res.error?.message ?? "").includes(code)
   const aName = (await admin.from("forums").select("name").eq("id", A.id).single()).data?.name
   const c1 = await A.member.client.rpc("create_forum", { p_name: "Dup", p_timezone: "UTC", p_admin_name: "X" })
   ok("12.10 create_forum refuses an existing member", codeIs(c1, "already_member"), c1.error?.message)

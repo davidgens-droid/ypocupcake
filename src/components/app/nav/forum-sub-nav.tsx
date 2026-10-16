@@ -10,6 +10,7 @@ const ITEMS = [
   { href: "/forum/commitments", label: "Commitments", match: /^\/forum\/commitments/ },
   { href: "/forum/photos", label: "Photos", match: /^\/forum\/photos/ },
   { href: "/forum/members", label: "Members", match: /^\/forum\/members/ },
+  { href: "/forum/charter", label: "Charter", match: /^\/forum\/charter/ },
 ]
 
 const QOL_ITEM = {

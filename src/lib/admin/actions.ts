@@ -6,6 +6,7 @@ import { z } from "zod"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { canRunMeetings, getMyRoles } from "@/lib/auth/roles"
 import { forumLocalInputToISO } from "@/lib/dates"
+import { CHARTER_MAX_BYTES, CHARTER_MIME_BY_EXT, parseCharterSettings } from "@/lib/forums/charter"
 import { createClient } from "@/lib/supabase/server"
 
 async function ensureAdmin() {
@@ -102,6 +103,8 @@ function friendlyRpcError(message: string): string {
   if (message.includes("invalid_name")) return "Give the forum a name between 2 and 80 characters."
   if (message.includes("invalid_timezone")) return "That timezone isn't recognised. Pick one from the list."
   if (message.includes("charter_too_long")) return "The charter is over 50,000 characters."
+  if (message.includes("invalid_document")) return "That file couldn't be attached. Upload a PDF, Word, text or image file under 20 MB."
+  if (message.includes("document_not_found")) return "The upload didn't complete. Please try again."
   return message
 }
 
@@ -262,6 +265,66 @@ export async function saveCharter(input: { charter: string }): Promise<ActionRes
   })
   if (error) return { ok: false, error: friendlyRpcError(error.message) }
   revalidatePath("/admin/charter")
+  revalidatePath("/forum/charter")
+  return { ok: true }
+}
+
+// ─── Charter as an uploaded document ────────────────────────────────────────
+//
+// The browser uploads straight to the private 'charters' bucket (0023:
+// only the forum's admins may write under the forum's prefix), then calls
+// setCharterDocument() to record it. The RPC re-checks that the path is
+// under the caller's forum and that the object really exists.
+
+async function currentCharterDocumentPath(forumId: string): Promise<string | null> {
+  const supabase = await createClient()
+  const { data } = await supabase.from("forums").select("settings").eq("id", forumId).maybeSingle()
+  return parseCharterSettings(data?.settings).document?.path ?? null
+}
+
+export async function setCharterDocument(input: {
+  path: string
+  name: string
+  size: number
+  type: string
+}): Promise<ActionResult> {
+  const me = await ensureAdmin()
+  const schema = z.object({
+    path: z.string().regex(new RegExp(`^${me.forum_id}/[0-9a-f-]{36}\\.[a-z0-9]{2,5}$`)),
+    name: z.string().trim().min(1).max(200),
+    size: z.number().int().min(1).max(CHARTER_MAX_BYTES),
+    type: z.enum(Object.values(CHARTER_MIME_BY_EXT) as [string, ...string[]]),
+  })
+  const parsed = schema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: "That file couldn't be attached. Upload a PDF, Word, text or image file under 20 MB." }
+  }
+
+  const supabase = await createClient()
+  const previous = await currentCharterDocumentPath(me.forum_id)
+  const { error } = await supabase.rpc("set_charter_document", { p_document: parsed.data })
+  if (error) {
+    // Don't leave the fresh upload dangling.
+    await supabase.storage.from("charters").remove([parsed.data.path])
+    return { ok: false, error: friendlyRpcError(error.message) }
+  }
+  if (previous && previous !== parsed.data.path) {
+    await supabase.storage.from("charters").remove([previous])
+  }
+  revalidatePath("/admin/charter")
+  revalidatePath("/forum/charter")
+  return { ok: true }
+}
+
+export async function removeCharterDocument(): Promise<ActionResult> {
+  const me = await ensureAdmin()
+  const supabase = await createClient()
+  const previous = await currentCharterDocumentPath(me.forum_id)
+  const { error } = await supabase.rpc("set_charter_document", { p_document: null })
+  if (error) return { ok: false, error: friendlyRpcError(error.message) }
+  if (previous) await supabase.storage.from("charters").remove([previous])
+  revalidatePath("/admin/charter")
+  revalidatePath("/forum/charter")
   return { ok: true }
 }
 
