@@ -53,16 +53,16 @@ Spec: `docs/superpowers/specs/2026-10-15-multi-forum-onboarding-design.md`. Each
 - [x] Isolation suite §12.13–12.15 (my_forum_status, update_forum_settings + suspended forum, forum_ai_calls_today).
 - [x] Review; commit (local — push after 0017–0020 are applied).
 
-## Phase 3 — Onboarding — built (local commit)
+## Phase 3 — Onboarding — live 2026-10-16 (0021 applied, pushed as 388da52)
 
 - [x] `0021_onboarding.sql`: `platform_settings` (`signup_enabled`, default **false**); `forum_invite_links` (+ `(id, forum_id)` unique, creator composite FK); `members.joined_via_link_id` composite FK; `create_forum`, `peek_invite` (the one anon-callable definer), `join_forum`, `create_invite_link`, `revoke_invite_link`, `signup_enabled()`, `is_valid_forum_timezone()`; drops `member_invites` + `handle_new_user` (refuses while invites are pending).
 - [x] Proxy allowlist: `/signup`, `/join/*`; `requireCurrentMember()`: membership-less → `/onboarding`; login form + auth callback route by `my_forum_status` (no more "not invited" sign-out).
 - [x] Pages: `/signup`, `/onboarding` (create / paste a link), `/join/[token]` (peek → inline sign-in → join), `/admin/invite` (current link, copy, revoke, new link with expiry + cap, joiners, past links); Admin → Members loses the email-invite UI; `src/lib/forums/actions.ts` wrappers (`{ok,error}`, §11 code → copy); first-run checklist card on the dashboard (admins, while < 2 members / no meeting / no charter).
 - [x] **Deviation from spec §6/§10 (deliberate):** the signup switch is `platform_settings.signup_enabled` in the database, not an env var — enforced by `create_forum()` itself and read by the pages via `signup_enabled()`. One switch, no redeploy: `update platform_settings set value = 'true' where key = 'signup_enabled';`
 - [x] Isolation suite: fixtures go through `create_forum` → `create_invite_link` → `join_forum`; assertions §12.10 (one forum per account incl. removed members; peek leaks only the name; links unreadable/uneditable by anyone but the forum's admins; expired / exhausted / revoked; founder = admin + moderator + technology; switch enforced and unflippable; allowlist gone); §12.12 allow-lists `peek_invite`.
-- [ ] Browser smoke test against the test project; review; commit. **Switch stays off until Resend SMTP is configured.**
+- [x] Browser smoke test against the test project; review; commit. Resend SMTP configured 2026-10-16; **the sign-up switch is still off** — the owner flips it from `/platform`.
 
-## Phase 4 — Platform layer — built (local commit)
+## Phase 4 — Platform layer — live 2026-10-16 (0022 applied, pushed as 6ad0f2c)
 
 - [x] `0022_platform.sql`: `platform_admins` (seeded with the owner, no policies, unreadable from a session), `is_platform_admin()`, `platform_forum_stats()` (forum-level aggregates + founder name/email only), `platform_set_forum_status()`, and `platform_set_signup_enabled()` so the sign-up switch can be flipped from the page.
 - [x] `/platform` (404 unless operator): sign-up switch + forum table (status, founder, members/admins, meetings, next meeting, AI calls 30d, last activity, created, Pause/Reactivate — never for the operator's own forum); "Platform" in the nav only for operators.
