@@ -152,7 +152,7 @@ export default async function DashboardPage() {
           <CardContent>
             <ul className="space-y-2 text-sm">
               <ChecklistItem done={(activeMembers ?? 0) >= 2} href="/admin/invite" label="Invite your members" hint="Share the forum's invite link." />
-              <ChecklistItem done={!!nextMeeting} href="/admin/meetings" label="Schedule your first meeting" hint="Updates live under a meeting." />
+              <ChecklistItem done={!!nextMeeting} href="/admin/meetings" label="Schedule your first meeting" hint="Required first: members can't start building their updates until a meeting is on the calendar." />
               <ChecklistItem done={charterWritten} href="/admin/charter" label="Write your charter" hint="Purpose, confidentiality, attendance." />
             </ul>
           </CardContent>
@@ -203,25 +203,43 @@ export default async function DashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Button
-            size="lg"
-            className="w-full"
-            disabled={!nextMeeting}
-            render={<Link href="/me/update" />}
-          >
-            {existingUpdate ? "Open my update" : "Start your update"}{" "}
-            <ArrowRight className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-fit gap-2"
-            disabled={!nextMeeting}
-            render={<Link href="/me/update?ai=brain-dump" />}
-          >
-            <Sparkles className="size-4" />
-            {existingUpdate ? "Refine with AI" : "Brain-dump with AI"}
-          </Button>
+          {nextMeeting ? (
+            <>
+              <Button size="lg" className="w-full" render={<Link href="/me/update" />}>
+                {existingUpdate ? "Open my update" : "Start your update"}{" "}
+                <ArrowRight className="size-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit gap-2"
+                render={<Link href="/me/update?ai=brain-dump" />}
+              >
+                <Sparkles className="size-4" />
+                {existingUpdate ? "Refine with AI" : "Brain-dump with AI"}
+              </Button>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed bg-muted/40 p-4 text-sm text-muted-foreground">
+              <p>
+                The update builder and the AI brain-dump open once a forum
+                meeting is on the calendar, because every update belongs to a
+                meeting.
+              </p>
+              {me.is_admin || isModerator ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 gap-2"
+                  render={<Link href="/admin/meetings" />}
+                >
+                  <Calendar className="size-4" /> Schedule the first meeting
+                </Button>
+              ) : (
+                <p className="mt-2">Your admin or moderator schedules meetings under Admin → Calendar.</p>
+              )}
+            </div>
+          )}
           {nextMeeting?.status === "upcoming" && (isModerator || me.is_admin) && (
             <Button
               variant="outline"
