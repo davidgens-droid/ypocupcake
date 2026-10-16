@@ -10,16 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createForum } from "@/lib/forums/actions"
-
-const TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/
-
-/** Accepts the full link or just the token; returns the token or null. */
-export function extractInviteToken(raw: string): string | null {
-  const s = raw.trim()
-  const afterJoin = s.includes("/join/") ? s.slice(s.indexOf("/join/") + 6) : s
-  const token = afterJoin.split(/[?#/\s]/)[0]
-  return TOKEN_RE.test(token) ? token : null
-}
+import { extractInviteToken } from "@/lib/forums/invite-token"
 
 // The browser's zone, read through useSyncExternalStore so SSR renders a
 // stable default and the client corrects it without an effect.
