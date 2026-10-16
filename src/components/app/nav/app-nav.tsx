@@ -7,6 +7,7 @@ import {
   Users,
   NotebookPen,
   Settings,
+  ShieldCheck,
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -22,6 +23,13 @@ const NAV_ITEMS = [
   { href: "/me/update", label: "Me", icon: NotebookPen, match: /^\/me/ },
   { href: "/admin", label: "More", icon: Settings, match: /^\/admin/ },
 ]
+
+// Platform operators only (is_platform_admin()); never shown otherwise.
+const PLATFORM_ITEM = { href: "/platform", label: "Platform", icon: ShieldCheck, match: /^\/platform/ }
+
+function navItems(showPlatform: boolean) {
+  return showPlatform ? [...NAV_ITEMS, PLATFORM_ITEM] : NAV_ITEMS
+}
 
 function NavLink({
   href,
@@ -67,8 +75,9 @@ function NavLink({
   )
 }
 
-export function AppSidebar({ forumName }: { forumName: string }) {
+export function AppSidebar({ forumName, showPlatform = false }: { forumName: string; showPlatform?: boolean }) {
   const pathname = usePathname()
+  const items = navItems(showPlatform)
 
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-background px-4 py-6 md:flex md:flex-col">
@@ -79,7 +88,7 @@ export function AppSidebar({ forumName }: { forumName: string }) {
         <p className="text-xs text-muted-foreground">Cupcake · forum companion</p>
       </div>
       <nav className="flex flex-col gap-1">
-        {NAV_ITEMS.map((item) => (
+        {items.map((item) => (
           <NavLink
             key={item.href}
             href={item.href}
@@ -94,12 +103,13 @@ export function AppSidebar({ forumName }: { forumName: string }) {
   )
 }
 
-export function AppTabBar() {
+export function AppTabBar({ showPlatform = false }: { showPlatform?: boolean }) {
   const pathname = usePathname()
+  const items = navItems(showPlatform)
 
   return (
     <nav className="sticky bottom-0 z-30 flex w-full border-t bg-background md:hidden">
-      {NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <NavLink
           key={item.href}
           href={item.href}

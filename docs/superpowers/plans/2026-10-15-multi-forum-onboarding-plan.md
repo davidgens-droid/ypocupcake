@@ -62,10 +62,11 @@ Spec: `docs/superpowers/specs/2026-10-15-multi-forum-onboarding-design.md`. Each
 - [x] Isolation suite: fixtures go through `create_forum` → `create_invite_link` → `join_forum`; assertions §12.10 (one forum per account incl. removed members; peek leaks only the name; links unreadable/uneditable by anyone but the forum's admins; expired / exhausted / revoked; founder = admin + moderator + technology; switch enforced and unflippable; allowlist gone); §12.12 allow-lists `peek_invite`.
 - [ ] Browser smoke test against the test project; review; commit. **Switch stays off until Resend SMTP is configured.**
 
-## Phase 4 — Platform layer
+## Phase 4 — Platform layer — built (local commit)
 
-- [ ] `0022_platform.sql`: `platform_admins` (seeded), `is_platform_admin()`, `platform_forum_stats()`, `platform_set_forum_status()`.
-- [ ] `/platform` page + nav link; suite assertions §12.11; review; commit.
+- [x] `0022_platform.sql`: `platform_admins` (seeded with the owner, no policies, unreadable from a session), `is_platform_admin()`, `platform_forum_stats()` (forum-level aggregates + founder name/email only), `platform_set_forum_status()`, and `platform_set_signup_enabled()` so the sign-up switch can be flipped from the page.
+- [x] `/platform` (404 unless operator): sign-up switch + forum table (status, founder, members/admins, meetings, next meeting, AI calls 30d, last activity, created, Pause/Reactivate — never for the operator's own forum); "Platform" in the nav only for operators.
+- [x] Suite assertions §12.11 (operators only; nobody can self-promote; exact column set; numbers; pause ends access and kills the invite link; reactivate; switch). Review; commit.
 
 ## Owner checklist (per phase)
 
