@@ -53,14 +53,14 @@ Spec: `docs/superpowers/specs/2026-10-15-multi-forum-onboarding-design.md`. Each
 - [x] Isolation suite §12.13–12.15 (my_forum_status, update_forum_settings + suspended forum, forum_ai_calls_today).
 - [x] Review; commit (local — push after 0017–0020 are applied).
 
-## Phase 3 — Onboarding
+## Phase 3 — Onboarding — built (local commit)
 
-- [ ] `0021_onboarding.sql`: `forum_invite_links`; `members.joined_via_link_id` FK; `create_forum`, `peek_invite`, `join_forum`, `create_invite_link`, `revoke_invite_link` RPCs; drop `member_invites` + `handle_new_user` (after the pending-invite check).
-- [ ] Proxy allowlist: `/signup`, `/join`; `(app)` layout: membership-less → `/onboarding`.
-- [ ] Pages: `/signup`, `/onboarding`, `/join/[token]`, `/admin/invite`; `src/lib/forums/actions.ts` wrappers; first-run checklist card on the dashboard.
-- [ ] `SIGNUP_ENABLED` flag (env) gating `/signup` and the login-page link.
-- [ ] Isolation suite: fixtures switch to the RPCs; assertions §12.10.
-- [ ] Browser smoke test against the test project; review; commit. Flag stays off until SMTP is configured.
+- [x] `0021_onboarding.sql`: `platform_settings` (`signup_enabled`, default **false**); `forum_invite_links` (+ `(id, forum_id)` unique, creator composite FK); `members.joined_via_link_id` composite FK; `create_forum`, `peek_invite` (the one anon-callable definer), `join_forum`, `create_invite_link`, `revoke_invite_link`, `signup_enabled()`, `is_valid_forum_timezone()`; drops `member_invites` + `handle_new_user` (refuses while invites are pending).
+- [x] Proxy allowlist: `/signup`, `/join/*`; `requireCurrentMember()`: membership-less → `/onboarding`; login form + auth callback route by `my_forum_status` (no more "not invited" sign-out).
+- [x] Pages: `/signup`, `/onboarding` (create / paste a link), `/join/[token]` (peek → inline sign-in → join), `/admin/invite` (current link, copy, revoke, new link with expiry + cap, joiners, past links); Admin → Members loses the email-invite UI; `src/lib/forums/actions.ts` wrappers (`{ok,error}`, §11 code → copy); first-run checklist card on the dashboard (admins, while < 2 members / no meeting / no charter).
+- [x] **Deviation from spec §6/§10 (deliberate):** the signup switch is `platform_settings.signup_enabled` in the database, not an env var — enforced by `create_forum()` itself and read by the pages via `signup_enabled()`. One switch, no redeploy: `update platform_settings set value = 'true' where key = 'signup_enabled';`
+- [x] Isolation suite: fixtures go through `create_forum` → `create_invite_link` → `join_forum`; assertions §12.10 (one forum per account incl. removed members; peek leaks only the name; links unreadable/uneditable by anyone but the forum's admins; expired / exhausted / revoked; founder = admin + moderator + technology; switch enforced and unflippable; allowlist gone); §12.12 allow-lists `peek_invite`.
+- [ ] Browser smoke test against the test project; review; commit. **Switch stays off until Resend SMTP is configured.**
 
 ## Phase 4 — Platform layer
 
@@ -74,5 +74,5 @@ Spec: `docs/superpowers/specs/2026-10-15-multi-forum-onboarding-design.md`. Each
 0. Run catalog queries → share output.
 1. Run 0016 (if any), 0017, 0018, 0019 in order → say so → code is pushed → confirm Admin → Members still edits/removes, a round can be started, charter saves, photos upload.
 2. Run 0020 → confirm meeting times unchanged (Vancouver).
-3. Run 0021 → create the test project keys in `.env.test.local` (`TEST_SUPABASE_URL`, `TEST_SUPABASE_ANON_KEY`, `TEST_SUPABASE_SERVICE_ROLE_KEY`, `TEST_DATABASE_URL` from the test project's Settings → Database) — needed from Phase 1's verification onward → configure Resend SMTP → set `SIGNUP_ENABLED=true` in Vercel.
+3. Run 0021 (it refuses while email invites are pending — revoke them in Admin → Members first) → code is pushed → configure Resend custom SMTP in Supabase Auth → open signups with one line in the SQL editor: `update platform_settings set value = 'true' where key = 'signup_enabled';` (nothing reads an env var for this).
 4. Run 0022 → open `/platform`.

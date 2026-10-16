@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 
 const ALL_ITEMS = [
   { href: "/admin/members", label: "Members", match: /^\/admin\/members/, adminOnly: true },
+  { href: "/admin/invite", label: "Invite", match: /^\/admin\/invite/, adminOnly: true },
   { href: "/admin/roles", label: "Roles", match: /^\/admin\/roles/, adminOnly: true },
   { href: "/admin/meetings", label: "Calendar", match: /^\/admin\/meetings/, adminOnly: false },
   { href: "/admin/charter", label: "Charter", match: /^\/admin\/charter/, adminOnly: true },

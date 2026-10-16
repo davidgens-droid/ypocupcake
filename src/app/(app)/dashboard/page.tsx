@@ -7,6 +7,8 @@ import {
   Sparkles,
   Calendar,
   AlertTriangle,
+  CheckCircle2,
+  Circle,
   History,
   Image as ImageIcon,
   PlusCircle,
@@ -34,6 +36,28 @@ function daysUntil(iso: string): number {
   return Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)))
 }
 
+function ChecklistItem({ done, href, label, hint }: { done: boolean; href: string; label: string; hint: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      {done ? (
+        <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+      ) : (
+        <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      )}
+      <div>
+        {done ? (
+          <span className="text-muted-foreground line-through">{label}</span>
+        ) : (
+          <Link href={href} className="font-medium underline-offset-2 hover:underline">
+            {label}
+          </Link>
+        )}
+        {!done && <p className="text-xs text-muted-foreground">{hint}</p>}
+      </div>
+    </li>
+  )
+}
+
 export default async function DashboardPage() {
   const me = await requireCurrentMember()
   const supabase = await createClient()
@@ -43,6 +67,8 @@ export default async function DashboardPage() {
     { data: nextMeeting },
     { data: openCommitments },
     roles,
+    { count: activeMembers },
+    { data: forumRow },
   ] = await Promise.all([
     supabase
       .from("meetings")
@@ -62,7 +88,19 @@ export default async function DashboardPage() {
       .order("due_date", { ascending: true, nullsFirst: false })
       .limit(5),
     getMyRoles(me),
+    // For the first-run checklist (admins of a brand-new forum).
+    supabase
+      .from("members")
+      .select("id", { count: "exact", head: true })
+      .eq("forum_id", me.forum_id)
+      .eq("status", "active"),
+    supabase.from("forums").select("settings").eq("id", me.forum_id).maybeSingle(),
   ])
+
+  const charterWritten =
+    typeof (forumRow?.settings as { charter?: unknown } | null)?.charter === "string" &&
+    ((forumRow?.settings as { charter: string }).charter.trim().length > 0)
+  const firstRun = me.is_admin && ((activeMembers ?? 0) < 2 || !nextMeeting || !charterWritten)
 
   const { data: existingUpdate } = nextMeeting
     ? await supabase
@@ -104,6 +142,22 @@ export default async function DashboardPage() {
           </h1>
         )}
       </header>
+
+      {/* First-run checklist: the three things a new forum's admin does first */}
+      {firstRun && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="text-base">Getting {me.forum.name} going</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-2 text-sm">
+              <ChecklistItem done={(activeMembers ?? 0) >= 2} href="/admin/invite" label="Invite your members" hint="Share the forum's invite link." />
+              <ChecklistItem done={!!nextMeeting} href="/admin/meetings" label="Schedule your first meeting" hint="Updates live under a meeting." />
+              <ChecklistItem done={charterWritten} href="/admin/charter" label="Write your charter" hint="Purpose, confidentiality, attendance." />
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Meeting access (when in progress) */}
       {nextMeeting?.status === "in_progress" && (

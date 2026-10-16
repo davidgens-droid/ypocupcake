@@ -4,9 +4,15 @@ import type { EmailOtpType } from "@supabase/supabase-js"
 import { getMembershipStatus } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
+/** Only same-origin, path-style destinations ("/join/abc"): never "//evil", "@evil", "\\evil". */
+function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || /[\\\s@]/.test(raw)) return "/dashboard"
+  return raw
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
-  const next = searchParams.get("next") ?? "/dashboard"
+  const next = safeNext(searchParams.get("next"))
 
   // Supabase may bounce back with its own error (e.g. otp_expired). Surface it.
   const supaError = searchParams.get("error_code") ?? searchParams.get("error")
@@ -57,12 +63,15 @@ export async function GET(request: Request) {
   }
 
   const status = await getMembershipStatus()
-  if (status.kind === "none") {
-    await supabase.auth.signOut()
-    return NextResponse.redirect(`${origin}/login?error=not_invited`)
+  if (status.kind === "anonymous") {
+    return NextResponse.redirect(`${origin}/login?error=no_user`)
   }
   if (status.kind === "removed") return NextResponse.redirect(`${origin}/removed`)
   if (status.kind === "suspended") return NextResponse.redirect(`${origin}/suspended`)
+  // A brand-new account: onboarding (or the invite link it came from).
+  if (status.kind === "none") {
+    return NextResponse.redirect(`${origin}${next.startsWith("/join/") ? next : "/onboarding"}`)
+  }
 
   return NextResponse.redirect(`${origin}${next}`)
 }

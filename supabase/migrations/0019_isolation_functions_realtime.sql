@@ -136,8 +136,13 @@ grant  execute on function forum_qol_history() to authenticated;
 revoke execute on function create_notification(uuid, text, text, text) from public, anon;
 grant  execute on function create_notification(uuid, text, text, text) to authenticated;
 -- Trigger function: nobody calls it directly. EXECUTE is checked at CREATE
--- TRIGGER time (owner), not when the trigger fires.
-revoke execute on function handle_new_user() from public, anon, authenticated;
+-- TRIGGER time (owner), not when the trigger fires. (Guarded: 0021 drops
+-- this function, and this file must stay re-runnable afterwards.)
+do $$ begin
+  if to_regproc('public.handle_new_user') is not null then
+    revoke execute on function handle_new_user() from public, anon, authenticated;
+  end if;
+end $$;
 
 -- ──────────────────────────────────────────────────────────────────────────
 -- 4. Realtime: DELETE events carry only the primary key

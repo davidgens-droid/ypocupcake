@@ -23,44 +23,8 @@ async function ensureMeetingManager() {
   return me
 }
 
-// ─── Member invites ─────────────────────────────────────────────────────────
-const inviteSchema = z.object({
-  email: z.string().trim().toLowerCase().email(),
-  name: z.string().trim().min(1).max(120),
-  is_admin: z.string().optional(),
-})
-
-export async function createInvite(formData: FormData) {
-  const me = await ensureAdmin()
-  const parsed = inviteSchema.parse({
-    email: formData.get("email"),
-    name: formData.get("name"),
-    is_admin: formData.get("is_admin") ?? undefined,
-  })
-
-  const supabase = await createClient()
-  const { error } = await supabase.from("member_invites").upsert({
-    email: parsed.email,
-    forum_id: me.forum_id,
-    name: parsed.name,
-    is_admin: parsed.is_admin === "on",
-  })
-  if (error) throw new Error(error.message)
-  revalidatePath("/admin/members")
-}
-
-export async function deleteInvite(formData: FormData) {
-  await ensureAdmin()
-  const email = String(formData.get("email") ?? "").trim().toLowerCase()
-  if (!email) return
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from("member_invites")
-    .delete()
-    .eq("email", email)
-  if (error) throw new Error(error.message)
-  revalidatePath("/admin/members")
-}
+// (Email invites are gone: members join through the forum's invite link —
+// see src/lib/forums/actions.ts.)
 
 // ─── Members (edit profile fields admin can manage) ────────────────────────
 const memberPatchSchema = z.object({

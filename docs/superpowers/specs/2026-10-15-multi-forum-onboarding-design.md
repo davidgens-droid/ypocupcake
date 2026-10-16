@@ -103,7 +103,7 @@ Then → `/dashboard` with a first-run checklist card (shown while the forum has
 ### 6.3 Join via link
 Admin → **Invite link** page (`/admin/invite`): shows the active link (`https://<host>/join/<token>`, copy button), expiry and uses `n / max`, **Revoke**, **New link** (revokes the previous), editable expiry (1–90 days) and cap (1–200 or unlimited), and the joiner list (name, joined-at, which link).
 
-`/join/[token]`: `peek_invite(p_token) returns (forum_name text, valid boolean, reason text)` — SECURITY DEFINER; returns only the forum name and a reason code (`expired`, `revoked`, `exhausted`, `unknown`). If not signed in, the code-login form renders inline and returns to the same URL. If the caller already belongs to a forum: explain one forum per account (name the forum; "sign in with a different email to join another"). Otherwise: "Join *<forum name>*" + name field → `join_forum(p_token, p_name) returns uuid`:
+`/join/[token]`: `peek_invite(p_token) returns (forum_name text, valid boolean, reason text, is_mine boolean)` — SECURITY DEFINER; returns only the forum name, a reason code (`expired`, `revoked`, `exhausted`, `forum_suspended`, `unknown`) and, for a signed-in caller, whether the link points at the forum they already belong to (names aren't unique, so the page compares by this, not by name). If not signed in, the code-login form renders inline and returns to the same URL. If the caller already belongs to a forum: explain one forum per account (name the forum; "sign in with a different email to join another"). Otherwise: "Join *<forum name>*" + name field → `join_forum(p_token, p_name) returns uuid`:
 1. `auth.uid()` must exist and have no `members` row.
 2. Lock the link row; require unrevoked, unexpired, `uses < max_uses` (if set), forum `active`.
 3. Insert `members` (`is_admin false`, `status active`), `uses = uses + 1`, record `joined_via_link_id` on the member.
@@ -170,7 +170,7 @@ Plus adversarial review workflows per phase and a browser smoke test (sign up �
 | 0 Reconcile | `0016_reconcile_live_policies.sql` (live `pg_policies`/`pg_proc` diff) | none | — |
 | 1 Fence | `0017_isolation_anchor.sql`, `0018_isolation_fks_policies.sql`, `0019_isolation_functions_realtime.sql` | admin RPC, bell, photo TTL/path, callback log | isolation suite §12.1–9 green on test project |
 | 2 Forum settings | `0020_forum_settings.sql` | timezone/name plumbing, AI caps | suite green |
-| 3 Onboarding | `0021_onboarding.sql` (invite links, RPCs, drop allowlist) | routes + admin pages, `SIGNUP_ENABLED=false` | suite §12.10 green; Resend SMTP configured; then flip the flag |
+| 3 Onboarding | `0021_onboarding.sql` (invite links, RPCs, drop allowlist, `platform_settings.signup_enabled = false`) | routes + admin pages | suite §12.10 green; Resend SMTP configured; then `update platform_settings set value = 'true' where key = 'signup_enabled'` (the switch lives in the DB, enforced by `create_forum()`, not in an env var) |
 | 4 Platform | `0022_platform.sql` | `/platform` | suite §12.11 green |
 
 Each migration is idempotent and applied by the owner in the Supabase SQL editor, in order, with a one-line checklist per phase.

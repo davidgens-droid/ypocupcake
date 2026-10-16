@@ -74,30 +74,36 @@ function renderableTimezone(tz: string): string {
 }
 
 export type MembershipStatus =
-  | { kind: "member" }
+  | { kind: "member"; forumName: string }
   | { kind: "removed"; forumName: string }
   | { kind: "suspended"; forumName: string }
+  /** Signed in, but the account belongs to no forum yet → onboarding. */
   | { kind: "none" }
+  | { kind: "anonymous" }
 
 /**
- * For a signed-in user who is NOT an active member of an active forum:
- * which case are they? Backed by a SECURITY DEFINER RPC that returns only
- * the two statuses and the forum name.
+ * Which case is the caller in? Backed by a SECURITY DEFINER RPC that returns
+ * only the two statuses and the forum name, for ANY membership state.
  */
-export async function getMembershipStatus(): Promise<MembershipStatus> {
+export const getMembershipStatus = cache(async (): Promise<MembershipStatus> => {
   const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { kind: "anonymous" }
   const { data } = await supabase.rpc("my_forum_status").maybeSingle()
   if (!data) return { kind: "none" }
   const row = data as { forum_name: string; forum_status: string; member_status: string }
   if (row.member_status === "removed") return { kind: "removed", forumName: row.forum_name }
   if (row.forum_status !== "active") return { kind: "suspended", forumName: row.forum_name }
-  return { kind: "member" }
-}
+  return { kind: "member", forumName: row.forum_name }
+})
 
 /**
  * Server helper: ensures the request is authenticated and the caller is an
  * active member of an active forum. Otherwise sends them to the page that
- * explains why. Use in protected page server components.
+ * explains why (or lets them create/join a forum). Use in protected page
+ * server components.
  */
 export async function requireCurrentMember(): Promise<CurrentMember> {
   const member = await getCurrentMember()
@@ -105,5 +111,6 @@ export async function requireCurrentMember(): Promise<CurrentMember> {
   const status = await getMembershipStatus()
   if (status.kind === "removed") redirect("/removed")
   if (status.kind === "suspended") redirect("/suspended")
+  if (status.kind === "none") redirect("/onboarding")
   redirect("/login")
 }

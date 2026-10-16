@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cupcake-test",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-against-test.mjs"],
+      "port": 3001
+    }
+  ]
+}

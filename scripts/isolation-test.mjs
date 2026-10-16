@@ -96,10 +96,15 @@ async function resetAndMigrate() {
   // roles only) was deliberately NOT applied there, so it is not applied here.
   const NOT_IN_PRODUCTION = new Set(["0015_captured_items_privileged_read.sql"])
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql") && !NOT_IN_PRODUCTION.has(f)).sort()
+  // Production consumed the bootstrap invite (0003) on the owner's first
+  // sign-in; the test project never signs him in, so clear it before 0021's
+  // "no pending invites" guard — which must stay, for production's sake.
+  const BEFORE = { "0021_onboarding.sql": "delete from member_invites" }
   for (const f of files) {
     const sql = fs.readFileSync(path.join(dir, f), "utf8")
     process.stdout.write(`· applying ${f} … `)
     try {
+      if (BEFORE[f]) await pg.query(BEFORE[f])
       await pg.query(sql)
       console.log("ok")
     } catch (e) {
@@ -108,6 +113,29 @@ async function resetAndMigrate() {
       process.exit(1)
     }
   }
+  // Every migration from the multi-forum work on is applied by hand and must
+  // survive a second run (the owner re-runs a file after a fix). Prove it.
+  for (const f of files.filter((f) => f >= "0017")) {
+    process.stdout.write(`· re-applying ${f} (idempotency) … `)
+    try {
+      await pg.query(fs.readFileSync(path.join(dir, f), "utf8"))
+      console.log("ok")
+    } catch (e) {
+      console.log("FAILED")
+      console.error(`${f} is not re-runnable: ${e.message}`)
+      process.exit(1)
+    }
+  }
+  // The migrations ran over a direct connection; PostgREST (what the app and
+  // these fixtures talk to) caches the schema and must be told to reload —
+  // then given a moment to do it.
+  await pg.query("notify pgrst, 'reload schema'")
+  for (let i = 0; i < 30; i++) {
+    const probe = await admin.from("platform_settings").select("key").limit(1)
+    if (!probe.error) return
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  throw new Error("PostgREST schema cache did not pick up the new tables within 15s")
 }
 
 // ─── 2. fixtures ─────────────────────────────────────────────────────────────
@@ -131,21 +159,23 @@ function must(res, what) {
 }
 
 async function fixtures() {
-  console.log("· creating fixtures (service role)")
-  const year = new Date().getFullYear()
+  console.log("· creating fixtures (the real onboarding RPCs, then service-role content)")
+  // Signups are closed by default; open them for the run (the closed state
+  // is asserted in §12.10).
+  must(await admin.from("platform_settings").update({ value: true }).eq("key", "signup_enabled"), "open signups")
   const forums = {}
   for (const key of ["A", "B"]) {
-    const f = must(await admin.from("forums").insert({ name: `Forum ${key}` }).select("id").single(), "forum")
     const adminUser = await makeUser(`${key.toLowerCase()}1@isolation.test`)
     const memberUser = await makeUser(`${key.toLowerCase()}2@isolation.test`)
-    must(await admin.from("members").insert([
-      { id: adminUser.id, forum_id: f.id, email: adminUser.email, name: `${key} Admin`, is_admin: true },
-      { id: memberUser.id, forum_id: f.id, email: memberUser.email, name: `${key} Member`, is_admin: false },
-    ]), "members")
-    must(await admin.from("roles").insert([
-      { forum_id: f.id, member_id: adminUser.id, role_type: "moderator", year },
-      { forum_id: f.id, member_id: adminUser.id, role_type: "technology", year },
-    ]), "roles")
+    const adminClient = await sessionFor(adminUser)
+    // The founder creates the forum (becomes admin + moderator + technology)…
+    const forumId = must(await adminClient.rpc("create_forum", { p_name: `Forum ${key}`, p_timezone: "America/Vancouver", p_admin_name: `${key} Admin` }), "create_forum")
+    // …issues the invite link, and the member joins through it.
+    const linkId = must(await adminClient.rpc("create_invite_link", { p_expires_days: 14, p_max_uses: 25 }), "create_invite_link")
+    const link = must(await adminClient.from("forum_invite_links").select("token").eq("id", linkId).single(), "read link")
+    const memberClient = await sessionFor(memberUser)
+    must(await memberClient.rpc("join_forum", { p_token: link.token, p_name: `${key} Member` }), "join_forum")
+    const f = { id: forumId }
     const meeting = must(await admin.from("meetings").insert({ forum_id: f.id, scheduled_at: new Date().toISOString(), location: `Room ${key}` }).select("id").single(), "meeting")
     must(await admin.from("attendees").insert({ meeting_id: meeting.id, member_id: memberUser.id, attending: true }), "attendee")
     const agenda = must(await admin.from("agenda_items").insert({ meeting_id: meeting.id, kind: "updates", title: "Updates", position: 1 }).select("id").single(), "agenda item")
@@ -159,19 +189,24 @@ async function fixtures() {
     }), "update")
     must(await admin.from("commitments").insert({ forum_id: f.id, member_id: memberUser.id, text: `Commit ${key}` }), "commitment")
     const album = must(await admin.from("photo_albums").insert({ forum_id: f.id, name: `Album ${key}`, created_by: memberUser.id }).select("id").single(), "album")
-    const memberClient = await sessionFor(memberUser)
     // A REAL object, uploaded as the member, so the storage assertions bite.
     const objectPath = `${f.id}/${memberUser.id}/${randomUUID()}.txt`
     const up = await memberClient.storage.from("photos").upload(objectPath, new Blob([`photo ${key}`]))
     if (up.error) throw new Error(`fixture upload ${key}: ${up.error.message}`)
     must(await admin.from("photos").insert({ forum_id: f.id, uploader_member_id: memberUser.id, storage_path: objectPath, album_id: album.id }), "photo")
     forums[key] = {
-      id: f.id, meeting: meeting.id, item: item.id, agenda: agenda.id, objectPath,
-      admin: { ...adminUser, client: await sessionFor(adminUser) },
+      id: f.id, meeting: meeting.id, item: item.id, agenda: agenda.id, objectPath, linkId, token: link.token,
+      admin: { ...adminUser, client: adminClient },
       member: { ...memberUser, client: memberClient },
     }
   }
   return forums
+}
+
+/** A brand-new signed-in account with no membership anywhere. */
+async function freshAccount(tag) {
+  const u = await makeUser(`${tag}@isolation.test`)
+  return { ...u, client: await sessionFor(u) }
 }
 
 // ─── 3. assertions ───────────────────────────────────────────────────────────
@@ -364,13 +399,90 @@ async function assertions(F) {
   const ai3 = await anon.rpc("forum_ai_calls_today")
   ok("12.15 anonymous caller cannot call forum_ai_calls_today", isRejected(ai3))
 
-  // §12.10 / 12.11 — onboarding + platform RPCs (present from Phase 3 / 4)
+  // §12.10 — onboarding: one forum per account; links expire/revoke/exhaust; peek reveals only the name
+  const codeIs = (res, code) => isRejected(res) && (res.error?.message ?? "").includes(code)
+  const aName = (await admin.from("forums").select("name").eq("id", A.id).single()).data?.name
+  const c1 = await A.member.client.rpc("create_forum", { p_name: "Dup", p_timezone: "UTC", p_admin_name: "X" })
+  ok("12.10 create_forum refuses an existing member", codeIs(c1, "already_member"), c1.error?.message)
+  const j1 = await A.member.client.rpc("join_forum", { p_token: B.token, p_name: "Hopper" })
+  ok("12.10 join_forum refuses a member of another forum (one forum per account)", codeIs(j1, "already_member"), j1.error?.message)
+  must(await A.admin.client.rpc("remove_member", { p_member_id: A.member.id }), "remove for 12.10")
+  const j1b = await A.member.client.rpc("join_forum", { p_token: B.token, p_name: "Hopper" })
+  ok("12.10 a removed member cannot join another forum either", codeIs(j1b, "already_member"), j1b.error?.message)
+  must(await A.admin.client.rpc("restore_member", { p_member_id: A.member.id }), "restore for 12.10")
+  const pk = await anon.rpc("peek_invite", { p_token: A.token }).maybeSingle()
+  ok("12.10 peek_invite (anon) returns exactly forum_name / valid / reason / is_mine", !pk.error && pk.data?.valid === true && pk.data?.forum_name === aName && pk.data?.is_mine === false && Object.keys(pk.data ?? {}).sort().join() === "forum_name,is_mine,reason,valid", JSON.stringify(pk.data ?? pk.error))
+  const pkMine = await A.member.client.rpc("peek_invite", { p_token: A.token }).maybeSingle()
+  const pkOther = await A.member.client.rpc("peek_invite", { p_token: B.token }).maybeSingle()
+  ok("12.10 peek_invite tells a member whether the link is their own forum's (by id, not name)", pkMine.data?.is_mine === true && pkOther.data?.is_mine === false, JSON.stringify({ mine: pkMine.data, other: pkOther.data }))
+  const pk2 = await anon.rpc("peek_invite", { p_token: "x".repeat(64) }).maybeSingle()
+  ok("12.10 peek_invite with an unknown token reveals nothing", !pk2.error && pk2.data?.valid === false && pk2.data?.forum_name == null && pk2.data?.reason === "unknown", JSON.stringify(pk2.data ?? pk2.error))
+  const l1 = await A.member.client.from("forum_invite_links").select("token")
+  ok("12.10 a plain member cannot read invite links", (l1.data ?? []).length === 0)
+  const l2 = await B.admin.client.from("forum_invite_links").select("token").eq("forum_id", A.id)
+  ok("12.10 another forum's admin cannot read our invite links", (l2.data ?? []).length === 0)
+  const l3 = await anon.from("forum_invite_links").select("token")
+  ok("12.10 anon cannot read invite links", isRejected(l3) || (l3.data ?? []).length === 0)
+  const l4 = await A.admin.client.from("forum_invite_links").update({ max_uses: 1000 }).eq("id", A.linkId)
+  const l4check = await admin.from("forum_invite_links").select("max_uses").eq("id", A.linkId).single()
+  ok("12.10 links cannot be edited directly, even by the admin", l4check.data?.max_uses === 25, l4.error?.message)
+  const l5 = await A.member.client.rpc("create_invite_link", {})
+  ok("12.10 a plain member cannot create invite links", codeIs(l5, "not_admin"), l5.error?.message)
+  const l6 = await B.admin.client.rpc("revoke_invite_link", { p_link_id: A.linkId })
+  ok("12.10 another forum's admin cannot revoke our link", codeIs(l6, "link_not_found"), l6.error?.message)
+  // expired → new link (retires the old) with max_uses 1 → one join works, the second is exhausted, then revoked
+  must(await admin.from("forum_invite_links").update({ expires_at: new Date(Date.now() - 60_000).toISOString() }).eq("id", A.linkId), "expire A's link")
+  const late = await freshAccount("fresh1")
+  const e1 = await late.client.rpc("join_forum", { p_token: A.token, p_name: "Late" })
+  ok("12.10 join_forum refuses an expired link", codeIs(e1, "expired"), e1.error?.message)
+  const pkExp = await anon.rpc("peek_invite", { p_token: A.token }).maybeSingle()
+  ok("12.10 peek_invite reports 'expired'", pkExp.data?.valid === false && pkExp.data?.reason === "expired", JSON.stringify(pkExp.data))
+  const newLinkId = must(await A.admin.client.rpc("create_invite_link", { p_expires_days: 7, p_max_uses: 1 }), "new link")
+  const newLink = must(await A.admin.client.from("forum_invite_links").select("token").eq("id", newLinkId).single(), "read new link")
+  const oldLink = must(await admin.from("forum_invite_links").select("revoked_at").eq("id", A.linkId).single(), "old link")
+  ok("12.10 creating a new link retires the previous one", !!oldLink.revoked_at)
+  const first = await freshAccount("fresh2")
+  const ok1 = await first.client.rpc("join_forum", { p_token: newLink.token, p_name: "First In" })
+  ok("12.10 (control) a fresh account joins via a valid link", !ok1.error && ok1.data === A.id, ok1.error?.message)
+  const firstRow = await admin.from("members").select("forum_id, is_admin, status, joined_via_link_id").eq("id", first.id).single()
+  ok("12.10 the joiner is a plain active member of the right forum, tied to the link", firstRow.data?.forum_id === A.id && firstRow.data?.is_admin === false && firstRow.data?.status === "active" && firstRow.data?.joined_via_link_id === newLinkId, JSON.stringify(firstRow.data))
+  const second = await freshAccount("fresh3")
+  const ex = await second.client.rpc("join_forum", { p_token: newLink.token, p_name: "Too Late" })
+  ok("12.10 join_forum refuses an exhausted link", codeIs(ex, "exhausted"), ex.error?.message)
+  must(await A.admin.client.rpc("revoke_invite_link", { p_link_id: newLinkId }), "revoke")
+  const rv = await second.client.rpc("join_forum", { p_token: newLink.token, p_name: "Too Late" })
+  ok("12.10 join_forum refuses a revoked link", codeIs(rv, "revoked"), rv.error?.message)
+  const noStatus = await second.client.rpc("my_forum_status").maybeSingle()
+  ok("12.10 an account with no forum has no status row", !noStatus.error && noStatus.data == null, JSON.stringify(noStatus.data ?? noStatus.error))
+  // the signup switch: enforced by the RPC, readable by anyone, flippable by nobody from a session
+  must(await admin.from("platform_settings").update({ value: false }).eq("key", "signup_enabled"), "close signups")
+  const closed = await second.client.rpc("create_forum", { p_name: "Nope", p_timezone: "UTC", p_admin_name: "X" })
+  ok("12.10 create_forum refuses while signups are closed", codeIs(closed, "signup_disabled"), closed.error?.message)
+  const flag = await anon.rpc("signup_enabled")
+  ok("12.10 (control) anyone can read the signup switch", !flag.error && flag.data === false, flag.error?.message)
+  const flip = await second.client.from("platform_settings").update({ value: true }).eq("key", "signup_enabled")
+  const flipCheck = await admin.from("platform_settings").select("value").eq("key", "signup_enabled").single()
+  ok("12.10 the signup switch cannot be flipped from a user session", flipCheck.data?.value === false, flip.error?.message)
+  must(await admin.from("platform_settings").update({ value: true }).eq("key", "signup_enabled"), "reopen signups")
+  const badTz = await second.client.rpc("create_forum", { p_name: "Zone", p_timezone: "Factory", p_admin_name: "X" })
+  ok("12.10 create_forum refuses a non-renderable timezone", codeIs(badTz, "invalid_timezone"), badTz.error?.message)
+  const made = await second.client.rpc("create_forum", { p_name: "Forum C", p_timezone: "Europe/London", p_admin_name: "C Admin" })
+  ok("12.10 (control) a fresh account creates a forum", !made.error && !!made.data, made.error?.message)
+  if (made.data) {
+    const cm = await admin.from("members").select("is_admin, status").eq("id", second.id).single()
+    const cr = await admin.from("roles").select("role_type").eq("forum_id", made.data).eq("member_id", second.id)
+    ok("12.10 the founder is an active admin with the moderator + technology roles", cm.data?.is_admin === true && cm.data?.status === "active" && (cr.data ?? []).map((r) => r.role_type).sort().join() === "moderator,technology", JSON.stringify({ member: cm.data, roles: cr.data }))
+    const vis = await second.client.from("members").select("id")
+    ok("12.10 the new forum sees only itself", (vis.data ?? []).length === 1 && vis.data[0].id === second.id)
+    const cf = await second.client.from("forums").select("id, created_by").single()
+    ok("12.10 the new forum records its founder", cf.data?.id === made.data && cf.data?.created_by === second.id, JSON.stringify(cf.data ?? cf.error))
+  }
+  const gone = await pg.query(`select to_regclass('public.member_invites') as t, to_regproc('public.handle_new_user') as f`)
+  ok("12.10 the email allowlist (member_invites, handle_new_user) is gone", gone.rows[0].t == null && gone.rows[0].f == null, JSON.stringify(gone.rows[0]))
+
+  // §12.11 — platform RPCs (present from Phase 4)
   const { rows: fnRows } = await pg.query(`select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'`)
   const fns = new Set(fnRows.map((r) => r.proname))
-  if (fns.has("create_forum")) {
-    const c1 = await A.member.client.rpc("create_forum", { p_name: "Dup", p_timezone: "UTC", p_admin_name: "X" })
-    ok("12.10 create_forum refuses an existing member", isRejected(c1))
-  } else console.log("skip  12.10 (create_forum not yet migrated)")
   if (fns.has("platform_forum_stats")) {
     const p1 = await A.admin.client.rpc("platform_forum_stats")
     ok("12.11 platform_forum_stats refuses a non-platform user", isRejected(p1))
@@ -384,8 +496,10 @@ async function assertions(F) {
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.prosecdef
   `)
-  const anonExec = defs.filter((d) => d.anon_exec).map((d) => d.proname)
-  ok("12.12 no SECURITY DEFINER function is executable by anon", anonExec.length === 0, anonExec.join(", "))
+  // peek_invite is the ONE deliberate exception (a link holder may learn the
+  // forum's name before signing in); anything else here is a regression.
+  const anonExec = defs.filter((d) => d.anon_exec).map((d) => d.proname).filter((n) => n !== "peek_invite")
+  ok("12.12 no SECURITY DEFINER function other than peek_invite is executable by anon", anonExec.length === 0, anonExec.join(", "))
 }
 
 function walk(dir) {

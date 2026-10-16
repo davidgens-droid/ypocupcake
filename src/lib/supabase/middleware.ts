@@ -38,9 +38,13 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
+  // Public routes: the landing page, sign-in, the auth callback, public
+  // signup, and invite links (/join/<token> renders its own sign-in form).
   const isAuthRoute =
     pathname.startsWith("/login") ||
     pathname.startsWith("/auth") ||
+    pathname === "/signup" ||
+    pathname.startsWith("/join/") ||
     pathname === "/"
 
   if (!user && !isAuthRoute) {

@@ -1,35 +1,24 @@
+import Link from "next/link"
+import { redirect } from "next/navigation"
 import { format, parseISO } from "date-fns"
-import { Mail, Trash2, UserPlus } from "lucide-react"
+import { Link2, Mail } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { MemberStatusButton } from "@/components/app/admin/member-status-button"
-import { createInvite, deleteInvite } from "@/lib/admin/actions"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
 export default async function AdminMembersPage() {
   const me = await requireCurrentMember()
-  if (!me.is_admin) {
-    const { redirect } = await import("next/navigation")
-    redirect("/admin/meetings")
-  }
+  if (!me.is_admin) redirect("/admin/meetings")
   const supabase = await createClient()
 
-  const [{ data: allMembers }, { data: invites }] = await Promise.all([
-    supabase
-      .from("members")
-      .select("id, name, email, birthday, anniversary, is_admin, status, created_at")
-      .eq("forum_id", me.forum_id)
-      .order("name"),
-    supabase
-      .from("member_invites")
-      .select("email, name, is_admin, created_at")
-      .order("created_at", { ascending: false }),
-  ])
+  const { data: allMembers } = await supabase
+    .from("members")
+    .select("id, name, email, birthday, anniversary, is_admin, status, created_at")
+    .eq("forum_id", me.forum_id)
+    .order("name")
 
   const members = (allMembers ?? []).filter((m) => m.status !== "removed")
   const removed = (allMembers ?? []).filter((m) => m.status === "removed")
@@ -41,6 +30,9 @@ export default async function AdminMembersPage() {
           <h2 className="font-heading text-base font-semibold">
             Members ({members.length})
           </h2>
+          <Button size="sm" variant="outline" className="gap-1" render={<Link href="/admin/invite" />}>
+            <Link2 className="size-4" /> Invite link
+          </Button>
         </div>
         <ul className="space-y-2">
           {members.map((m) => (
@@ -113,89 +105,20 @@ export default async function AdminMembersPage() {
       )}
 
       <section className="space-y-2">
-        <h2 className="font-heading text-base font-semibold">
-          Pending invites ({invites?.length ?? 0})
-        </h2>
-        {(invites ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No pending invites. Add one below.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {invites!.map((i) => (
-              <li key={i.email}>
-                <Card>
-                  <CardContent className="flex items-center justify-between gap-2 py-3 text-sm">
-                    <div className="space-y-0.5">
-                      <p className="font-medium">
-                        {i.name}
-                        {i.is_admin && (
-                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
-                            Admin
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        <Mail className="mr-1 inline size-3" /> {i.email}
-                      </p>
-                    </div>
-                    <form action={deleteInvite}>
-                      <input type="hidden" name="email" value={i.email} />
-                      <Button
-                        type="submit"
-                        size="sm"
-                        variant="ghost"
-                        title="Revoke invite"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </form>
-                  </CardContent>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="font-heading text-base font-semibold">Invite a member</h2>
+        <h2 className="font-heading text-base font-semibold">Adding members</h2>
         <Card>
-          <CardContent className="py-4">
-            <form action={createInvite} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" name="name" required maxLength={120} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  autoComplete="off"
-                />
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border bg-muted/40 p-3">
-                <Switch id="is_admin" name="is_admin" />
-                <div>
-                  <Label htmlFor="is_admin" className="text-sm">
-                    Admin
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Admins can manage members, roles, calendar, and charter.
-                  </p>
-                </div>
-              </div>
-              <Button type="submit">
-                <UserPlus className="size-4" /> Add invite
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Invitee can sign in with this email. The invite is consumed on
-                their first sign-in.
-              </p>
-            </form>
+          <CardContent className="space-y-3 py-4 text-sm">
+            <p>
+              Share your forum&apos;s invite link. Whoever opens it signs in with
+              their own email and joins as a member; you can make them an admin
+              afterwards, and revoke the link whenever you like.
+            </p>
+            <Button size="sm" className="gap-1" render={<Link href="/admin/invite" />}>
+              <Link2 className="size-4" /> Manage the invite link
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Admins can manage members, roles, calendar, charter, and settings.
+            </p>
           </CardContent>
         </Card>
       </section>
