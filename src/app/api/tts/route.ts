@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 
+import { checkAiBudget } from "@/lib/ai/limits"
 import { getCurrentMember } from "@/lib/auth/current-member"
+import { createClient } from "@/lib/supabase/server"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -33,6 +35,11 @@ export async function POST(req: Request) {
   const me = await getCurrentMember()
   if (!me) return NextResponse.json({ error: "Not signed in." }, { status: 401 })
 
+  // Same fair-use gate as the Claude calls (the client falls back to the
+  // browser voice on any non-2xx, so a capped forum still gets its interview).
+  const budget = await checkAiBudget(me)
+  if (!budget.ok) return NextResponse.json({ error: budget.error }, { status: 429 })
+
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return NextResponse.json({ error: "Natural voice is not configured." }, { status: 501 })
 
@@ -50,6 +57,17 @@ export async function POST(req: Request) {
   const voiceEnv = process.env.OPENAI_TTS_VOICE?.trim()
   const voice = voiceEnv && VOICES.has(voiceEnv) ? voiceEnv : DEFAULT_VOICE
   const model = process.env.OPENAI_TTS_MODEL?.trim() || "gpt-4o-mini-tts"
+
+  // Count the call BEFORE spending: the fair-use caps are computed from
+  // ai_interactions, so an uncounted call site would be a free loop. Only the
+  // character count is stored — never the text.
+  const supabase = await createClient()
+  await supabase.from("ai_interactions").insert({
+    member_id: me.id,
+    kind: "tts",
+    tokens_in: text.length,
+    tokens_out: null,
+  })
 
   try {
     const upstream = await fetch("https://api.openai.com/v1/audio/speech", {

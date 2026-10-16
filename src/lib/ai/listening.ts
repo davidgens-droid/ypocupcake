@@ -6,6 +6,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
+import { aiMetadata, checkAiBudget } from "@/lib/ai/limits"
 import { AI_MODEL } from "@/lib/ai/model"
 import type { CurrentMember } from "@/lib/auth/current-member"
 import { getMyRoles, isParkingLotPrivileged } from "@/lib/auth/roles"
@@ -118,6 +119,11 @@ export async function extractParkingLotTopics(
   }
   const firstName = presenter.name?.split(" ")[0] ?? "the member"
 
+  // Fair-use gate, checked after the cheap validation above and before any
+  // tokens are spent. The transcript is dropped on the floor either way.
+  const budget = await checkAiBudget(me)
+  if (!budget.ok) return { ok: false, error: `Listening mode: ${budget.error} Nothing was saved.` }
+
   // One retry: the SDK's retry-after sleep ignores the abort signal, so two
   // retries could outlive the page's 120s maxDuration (55 + 55 + backoff).
   const client = new Anthropic({
@@ -136,6 +142,7 @@ export async function extractParkingLotTopics(
         // transcript can never crowd out the (small) JSON answer.
         max_tokens: 16_000,
         thinking: { type: "adaptive" },
+        metadata: aiMetadata(me),
         system: SYSTEM_PROMPT,
         messages: [
           {
@@ -183,6 +190,16 @@ List the potential parking-lot topics.`,
       { signal: AbortSignal.timeout(90_000) }
     )
 
+    // Token counts only — never the transcript — and counted as soon as the
+    // call is billed, so a truncated or refused answer still counts.
+    usage = response.usage
+    await supabase.from("ai_interactions").insert({
+      member_id: me.id,
+      kind: "listening_extract",
+      tokens_in: usage.input_tokens,
+      tokens_out: usage.output_tokens,
+    })
+
     if (response.stop_reason === "max_tokens") {
       console.warn("[listening] response truncated", { member: me.id })
       return { ok: false, error: "Listening mode: the extraction got cut off. Nothing was saved." }
@@ -200,7 +217,6 @@ List the potential parking-lot topics.`,
       console.warn("[listening] output failed schema", { member: me.id })
       return { ok: false, error: "Listening mode: the result was malformed. Nothing was saved." }
     }
-    usage = response.usage
 
     // Clip, drop empties, dedupe (case-insensitive) — the model occasionally
     // phrases the same dilemma twice.
@@ -237,14 +253,6 @@ List the potential parking-lot topics.`,
     })
     return { ok: false, error: "Listening mode: something went wrong. Nothing was saved." }
   }
-
-  // Token counts only — never the transcript.
-  await supabase.from("ai_interactions").insert({
-    member_id: me.id,
-    kind: "listening_extract",
-    tokens_in: usage.input_tokens,
-    tokens_out: usage.output_tokens,
-  })
 
   if (topics.length === 0) return { ok: true, topics: [] }
 

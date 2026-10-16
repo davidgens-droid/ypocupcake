@@ -3,8 +3,11 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+import { aiMetadata, checkAiBudget } from "@/lib/ai/limits"
 import { AI_MODEL } from "@/lib/ai/model"
+import type { CurrentMember } from "@/lib/auth/current-member"
 import { FORMAT_PHASES } from "@/lib/meetings/exploration-phases"
+import { createClient } from "@/lib/supabase/server"
 
 const FORMAT_CODES = Object.keys(FORMAT_PHASES)
 
@@ -39,10 +42,13 @@ const mergedSchema = z.object({
  * to a deterministic merge and never block the meeting wrap-up.
  */
 export async function mergeParkingLotItemsAI(
+  me: CurrentMember,
   captured: MergeItemInput,
   target: MergeItemInput
 ): Promise<MergedFields | null> {
   if (!process.env.ANTHROPIC_API_KEY) return null
+  // Over budget → the deterministic merge; the wrap-up never stalls on this.
+  if (!(await checkAiBudget(me)).ok) return null
 
   const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -100,6 +106,7 @@ Return the merged topic.`
       model: AI_MODEL,
       max_tokens: 4096,
       thinking: { type: "adaptive" },
+      metadata: aiMetadata(me),
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
       output_config: {
@@ -125,6 +132,16 @@ Return the merged topic.`
           },
         },
       },
+    })
+
+    // Counted as soon as it's billed — whether or not the answer is usable —
+    // so the fair-use caps see every call (token counts only).
+    const supabase = await createClient()
+    await supabase.from("ai_interactions").insert({
+      member_id: me.id,
+      kind: "parking_lot_merge",
+      tokens_in: response.usage.input_tokens,
+      tokens_out: response.usage.output_tokens,
     })
 
     if (response.stop_reason === "max_tokens") return null

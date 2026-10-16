@@ -79,16 +79,23 @@ async function resetAndMigrate() {
     drop policy if exists "photos_read_forum" on storage.objects;
     drop policy if exists "photos_insert_self" on storage.objects;
     drop policy if exists "photos_delete_self" on storage.objects;
-    delete from storage.objects where bucket_id = 'photos';
-    delete from storage.buckets where id = 'photos';
     drop trigger if exists on_auth_user_created on auth.users;
   `)
+  // Storage rows can't be deleted with SQL on current Supabase projects
+  // ("Use the Storage API instead"), so the bucket is emptied through the
+  // API. The bucket itself stays: 0004 creates it with `on conflict do
+  // nothing`, and deleting it right after emptying races the async cleanup.
+  const emptied = await admin.storage.emptyBucket("photos")
+  if (emptied.error && !/not found/i.test(emptied.error.message)) throw new Error(`emptyBucket: ${emptied.error.message}`)
   // Remove auth users from previous runs.
   const { data: list } = await admin.auth.admin.listUsers({ perPage: 1000 })
   for (const u of list?.users ?? []) if (u.email?.endsWith("@isolation.test")) await admin.auth.admin.deleteUser(u.id)
 
   const dir = path.join(ROOT, "supabase", "migrations")
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()
+  // Mirror production exactly: 0015 (captured items readable by privileged
+  // roles only) was deliberately NOT applied there, so it is not applied here.
+  const NOT_IN_PRODUCTION = new Set(["0015_captured_items_privileged_read.sql"])
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql") && !NOT_IN_PRODUCTION.has(f)).sort()
   for (const f of files) {
     const sql = fs.readFileSync(path.join(dir, f), "utf8")
     process.stdout.write(`· applying ${f} … `)
@@ -306,6 +313,56 @@ async function assertions(F) {
   const q2 = await A.member.client.rpc("forum_qol_history")
   ok("12.9 plain member cannot call forum_qol_history", isRejected(q2))
   ok("12.9 QoL rows never contain update content", (q1.data ?? []).every((r) => !("content" in r) && !("secret" in r)))
+
+  // §12.13 — my_forum_status: status + forum name, nothing more, for any member state
+  const st0 = await A.member.client.rpc("my_forum_status").maybeSingle()
+  ok("12.13 my_forum_status for an active member", st0.data?.member_status === "active" && st0.data?.forum_status === "active" && st0.data?.forum_name === "Forum A", JSON.stringify(st0.data ?? st0.error))
+  must(await A.admin.client.rpc("remove_member", { p_member_id: A.member.id }), "remove for 12.13")
+  const st1 = await A.member.client.rpc("my_forum_status").maybeSingle()
+  ok("12.13 a removed member learns 'removed' and the forum name only", st1.data?.member_status === "removed" && Object.keys(st1.data ?? {}).sort().join() === "forum_name,forum_status,member_status", JSON.stringify(st1.data ?? st1.error))
+  must(await A.admin.client.rpc("restore_member", { p_member_id: A.member.id }), "restore for 12.13")
+  const stAnon = await anon.rpc("my_forum_status")
+  ok("12.13 anonymous caller cannot call my_forum_status", isRejected(stAnon))
+
+  // §12.14 — forum settings: admin-only, validated, same-forum; no direct UPDATE on forums
+  const fs1 = await A.member.client.rpc("update_forum_settings", { p_name: "Hijacked" })
+  ok("12.14 a plain member cannot change forum settings", isRejected(fs1))
+  const fs2 = await A.admin.client.rpc("update_forum_settings", { p_timezone: "Mars/Olympus_Mons" })
+  ok("12.14 an unknown timezone is rejected", isRejected(fs2))
+  const fs3 = await A.admin.client.rpc("update_forum_settings", { p_name: "Forum A Renamed", p_timezone: "Europe/London", p_charter: "Be kind." })
+  ok("12.14 (control) admin can set name, timezone and charter", !fs3.error, fs3.error?.message)
+  const fsA = await admin.from("forums").select("name, timezone, settings").eq("id", A.id).single()
+  const fsB = await admin.from("forums").select("name, timezone, settings").eq("id", B.id).single()
+  ok("12.14 settings landed on forum A (charter stamped with the caller)", fsA.data?.name === "Forum A Renamed" && fsA.data?.timezone === "Europe/London" && fsA.data?.settings?.charter === "Be kind." && fsA.data?.settings?.charter_updated_by === A.admin.id, JSON.stringify(fsA.data))
+  ok("12.14 forum B untouched", fsB.data?.name === "Forum B" && fsB.data?.timezone === "America/Vancouver" && !fsB.data?.settings?.charter, JSON.stringify(fsB.data))
+  const fs4 = await A.admin.client.from("forums").update({ name: "Direct" }).eq("id", A.id)
+  const fs4check = await admin.from("forums").select("name").eq("id", A.id).single()
+  ok("12.14 direct UPDATE forums.name is refused even for an admin", fs4check.data?.name === "Forum A Renamed", fs4.error?.message)
+  const fs5 = await A.admin.client.from("forums").update({ status: "suspended" }).eq("id", B.id)
+  const fs5check = await admin.from("forums").select("status").eq("id", B.id).single()
+  ok("12.14 forum status cannot be changed from a user session", fs5check.data?.status === "active", fs5.error?.message)
+  // A suspended forum: its members read nothing, its admin can't change settings, my_forum_status says why.
+  must(await admin.from("forums").update({ status: "suspended" }).eq("id", B.id), "suspend B")
+  const sus1 = await B.member.client.from("meetings").select("id")
+  ok("12.14 a member of a suspended forum reads nothing", (sus1.data ?? []).length === 0)
+  const sus2 = await B.admin.client.rpc("update_forum_settings", { p_name: "Still here" })
+  ok("12.14 an admin of a suspended forum cannot change its settings", isRejected(sus2))
+  const sus3 = await B.member.client.rpc("my_forum_status").maybeSingle()
+  ok("12.14 my_forum_status reports the suspension", sus3.data?.forum_status === "suspended" && sus3.data?.member_status === "active", JSON.stringify(sus3.data ?? sus3.error))
+  must(await admin.from("forums").update({ status: "active" }).eq("id", B.id), "reactivate B")
+
+  // §12.15 — AI fair-use counter: the caller's forum only, a bare integer
+  must(await admin.from("ai_interactions").insert([
+    { member_id: A.admin.id, kind: "brain_dump", tokens_in: 1, tokens_out: 1 },
+    { member_id: A.member.id, kind: "brain_dump", tokens_in: 1, tokens_out: 1 },
+    { member_id: B.member.id, kind: "brain_dump", tokens_in: 1, tokens_out: 1 },
+  ]), "ai_interactions")
+  const ai1 = await A.member.client.rpc("forum_ai_calls_today")
+  ok("12.15 forum_ai_calls_today counts only the caller's forum", !ai1.error && ai1.data === 2, JSON.stringify(ai1.data ?? ai1.error))
+  const ai2 = await B.member.client.rpc("forum_ai_calls_today")
+  ok("12.15 ...and for the other forum too", !ai2.error && ai2.data === 1, JSON.stringify(ai2.data ?? ai2.error))
+  const ai3 = await anon.rpc("forum_ai_calls_today")
+  ok("12.15 anonymous caller cannot call forum_ai_calls_today", isRejected(ai3))
 
   // §12.10 / 12.11 — onboarding + platform RPCs (present from Phase 3 / 4)
   const { rows: fnRows } = await pg.query(`select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'`)

@@ -21,6 +21,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import { updateMeeting } from "@/lib/admin/actions"
+import { DATETIME_LOCAL_FORMAT, formatMeeting } from "@/lib/dates"
 
 type Member = { id: string; name: string }
 
@@ -33,22 +34,21 @@ type Props = {
     status: string
   }
   members: Member[]
+  /**
+   * The forum's IANA timezone. The datetime-local input shows and is saved
+   * as wall-clock time in THIS zone (updateMeeting parses it that way), so
+   * the value must be rendered in it too — not in the admin's browser zone,
+   * or an admin travelling would shift every meeting they touched.
+   */
+  timezone: string
 }
 
-// Convert an ISO timestamp (UTC) to the value format expected by
-// <input type="datetime-local">: "yyyy-MM-ddTHH:mm" in the user's local TZ.
-function isoToLocalInput(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => n.toString().padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-export function EditMeetingDialog({ meeting, members }: Props) {
+export function EditMeetingDialog({ meeting, members, timezone }: Props) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const [scheduledAt, setScheduledAt] = useState(
-    isoToLocalInput(meeting.scheduled_at)
+    formatMeeting(meeting.scheduled_at, DATETIME_LOCAL_FORMAT, timezone)
   )
   const [location, setLocation] = useState(meeting.location ?? "")
   const [hostId, setHostId] = useState(meeting.host_member_id ?? "")

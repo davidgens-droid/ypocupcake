@@ -1,31 +1,36 @@
-// Cupcake meets in Vancouver — render meeting times in Pacific Time so they
-// look right regardless of where the server (Vercel = UTC) or the user's
-// browser is. For non-meeting dates (commitment due dates, upload timestamps),
-// keep using browser-local formatting.
+// Meeting times are rendered in the FORUM's timezone (each forum has one,
+// forums.timezone) so they look right regardless of where the server
+// (Vercel = UTC) or the member's browser is. For non-meeting dates
+// (commitment due dates, upload timestamps), keep using browser-local
+// formatting. Server code passes `me.forum.timezone`; client components get
+// it as a `timezone` prop. The parameter is required on purpose: a call site
+// that forgets it fails to compile instead of silently showing another
+// forum's wall-clock time.
 
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz"
-
-export const FORUM_TZ = "America/Vancouver"
 
 // How long after a meeting's start time we still treat it as "current"
 // (so members can find their update, view the meeting room, etc.).
 // Forum meetings run ~3h; 8h gives a generous buffer for late finishes.
 export const MEETING_PAST_AFTER_HOURS = 8
 
-export function formatMeeting(iso: string, fmt: string): string {
-  return formatInTimeZone(iso, FORUM_TZ, fmt)
+/** The value format of `<input type="datetime-local">`. */
+export const DATETIME_LOCAL_FORMAT = "yyyy-MM-dd'T'HH:mm"
+
+export function formatMeeting(iso: string, fmt: string, timezone: string): string {
+  return formatInTimeZone(iso, timezone, fmt)
 }
 
-export function meetingDate(iso: string): Date {
-  return toZonedTime(iso, FORUM_TZ)
+export function meetingDate(iso: string, timezone: string): Date {
+  return toZonedTime(iso, timezone)
 }
 
 // Parse a `<input type="datetime-local">` value (e.g. "2026-05-15T18:00")
-// as Vancouver wall-clock time and return its UTC ISO string. Without this,
-// `new Date(local).toISOString()` on a UTC server (Vercel) interprets the
-// string as UTC and shifts the meeting 7–8 hours earlier.
-export function forumLocalInputToISO(local: string): string {
-  return fromZonedTime(local, FORUM_TZ).toISOString()
+// as wall-clock time in the forum's zone and return its UTC ISO string.
+// Without this, `new Date(local).toISOString()` on a UTC server (Vercel)
+// interprets the string as UTC and shifts the meeting by the zone offset.
+export function forumLocalInputToISO(local: string, timezone: string): string {
+  return fromZonedTime(local, timezone).toISOString()
 }
 
 // ISO string of the cutoff before which a meeting counts as "past".

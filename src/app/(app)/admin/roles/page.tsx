@@ -103,7 +103,7 @@ export default async function AdminRolesPage() {
           Annual roles · {year}
         </h2>
         <p className="text-sm text-muted-foreground">
-          One member per role per year. From the signed Cupcake Forum Norms.
+          One member per role per year, as set out in your forum norms.
         </p>
       </div>
 

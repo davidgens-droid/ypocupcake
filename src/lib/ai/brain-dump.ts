@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+import { aiMetadata, checkAiBudget } from "@/lib/ai/limits"
 import { AI_MODEL } from "@/lib/ai/model"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
@@ -99,6 +100,8 @@ export async function generateUpdateFromBrainDump(input: {
   }
 
   const me = await requireCurrentMember()
+  const budget = await checkAiBudget(me)
+  if (!budget.ok) return { ok: false, error: budget.error }
 
   let base: UpdateContent = emptyUpdateContent
   let refining = false
@@ -204,6 +207,7 @@ Now structure this into the YPO update fields.`
         // the JSON and breaking the parse. 16384 gives both room to breathe.
         max_tokens: 16384,
         thinking: { type: "adaptive" },
+        metadata: aiMetadata(me),
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
         output_config: {
@@ -260,6 +264,15 @@ Now structure this into the YPO update fields.`
       { signal: AbortSignal.timeout(110_000) }
     )
 
+    // Log usage for the fair-use caps as soon as the call is billed — a
+    // truncated or malformed answer still cost tokens and still counts.
+    await supabase.from("ai_interactions").insert({
+      member_id: me.id,
+      kind: refining ? "brain_dump_refine" : "brain_dump",
+      tokens_in: response.usage.input_tokens,
+      tokens_out: response.usage.output_tokens,
+    })
+
     // If the model hit the token ceiling, the JSON answer is truncated and
     // JSON.parse below would throw a cryptic error. Catch it explicitly.
     if (response.stop_reason === "max_tokens") {
@@ -305,14 +318,6 @@ Now structure this into the YPO update fields.`
           "The AI produced an update that didn't fit the form (a field came back too long). Please try again.",
       }
     }
-
-    // Log usage for cost-cap visibility.
-    await supabase.from("ai_interactions").insert({
-      member_id: me.id,
-      kind: refining ? "brain_dump_refine" : "brain_dump",
-      tokens_in: response.usage.input_tokens,
-      tokens_out: response.usage.output_tokens,
-    })
 
     return { ok: true, content: check.data, mode: refining ? "refine" : "create" }
   } catch (err) {

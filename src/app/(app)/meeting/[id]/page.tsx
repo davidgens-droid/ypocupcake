@@ -80,7 +80,7 @@ export default async function MeetingPage({ params }: { params: Params }) {
 
       <div>
         <h1 className="font-heading text-2xl font-semibold">
-          {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
+          {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a", me.forum.timezone)}
         </h1>
         <p className="text-sm text-muted-foreground">
           📍 {meeting.location ?? "TBD"} · status:{" "}

@@ -4,6 +4,7 @@ import Anthropic from "@anthropic-ai/sdk"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
+import { aiMetadata, checkAiBudget } from "@/lib/ai/limits"
 import { AI_MODEL } from "@/lib/ai/model"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
@@ -72,8 +73,10 @@ export async function getOrGeneratePatternCards(): Promise<PatternCard[]> {
     return existing
   }
 
-  // Need to generate. Skip silently if AI isn't configured.
+  // Need to generate. Skip silently if AI isn't configured, or if the forum
+  // has used its share for today (the cards reappear once there's budget).
   if (!process.env.ANTHROPIC_API_KEY) return []
+  if (!(await checkAiBudget(me)).ok) return []
 
   const { data: updates } = await supabase
     .from("updates")
@@ -129,6 +132,7 @@ If nothing meaningful jumps out, return an empty array. Better silent than to in
         // room without risking a truncated payload.
         max_tokens: 8192,
         thinking: { type: "adaptive" },
+        metadata: aiMetadata(me),
         system: systemPrompt,
         messages: [
           {
@@ -168,6 +172,14 @@ If nothing meaningful jumps out, return an empty array. Better silent than to in
       { signal: AbortSignal.timeout(110_000) }
     )
 
+    // Counted the moment it's billed, usable answer or not.
+    await supabase.from("ai_interactions").insert({
+      member_id: me.id,
+      kind: "pattern_cards",
+      tokens_in: response.usage.input_tokens,
+      tokens_out: response.usage.output_tokens,
+    })
+
     // If the model hit the token ceiling the JSON is truncated and would fail
     // to parse with a cryptic error. Catch it explicitly.
     if (response.stop_reason === "max_tokens") {
@@ -193,13 +205,6 @@ If nothing meaningful jumps out, return an empty array. Better silent than to in
     // trimmed card instead of the whole batch being thrown away.
     const raw = JSON.parse(textBlock.text) as { cards?: unknown }
     const parsed = aiOutputSchema.parse({ cards: clipCards(raw.cards) })
-
-    await supabase.from("ai_interactions").insert({
-      member_id: me.id,
-      kind: "pattern_cards",
-      tokens_in: response.usage.input_tokens,
-      tokens_out: response.usage.output_tokens,
-    })
 
     if (parsed.cards.length === 0) return []
 

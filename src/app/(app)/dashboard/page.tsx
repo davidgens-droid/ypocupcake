@@ -76,19 +76,21 @@ export default async function DashboardPage() {
   const isModerator = hasAny(roles, "moderator", "assistant_moderator")
 
   const greetingName = me.name.split(" ")[0]
+  // The server runs in UTC; greet by the forum's clock, not the server's.
+  const forumHour = Number(formatMeeting(today.toISOString(), "H", me.forum.timezone))
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
       <header className="space-y-1">
         <p className="text-sm text-muted-foreground">
-          Good {today.getHours() < 12 ? "morning" : today.getHours() < 18 ? "afternoon" : "evening"},{" "}
+          Good {forumHour < 12 ? "morning" : forumHour < 18 ? "afternoon" : "evening"},{" "}
           {greetingName}
         </p>
         {nextMeeting ? (
           <>
             <h1 className="font-heading text-2xl font-semibold">
-              {formatMeeting(nextMeeting.scheduled_at, "EEE MMM d")} ·{" "}
-              {formatMeeting(nextMeeting.scheduled_at, "h:mm a")}
+              {formatMeeting(nextMeeting.scheduled_at, "EEE MMM d", me.forum.timezone)} ·{" "}
+              {formatMeeting(nextMeeting.scheduled_at, "h:mm a", me.forum.timezone)}
             </h1>
             <p className="text-sm text-muted-foreground">
               <Calendar className="mr-1 inline size-3.5" />

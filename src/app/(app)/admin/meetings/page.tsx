@@ -66,6 +66,9 @@ export default async function AdminMeetingsPage() {
                   type="datetime-local"
                   required
                 />
+                <p className="text-xs text-muted-foreground">
+                  Forum time ({me.forum.timezone.replace(/_/g, " ")}). Change it under Settings.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="location">Location</Label>
@@ -115,6 +118,7 @@ export default async function AdminMeetingsPage() {
                   m.host_member_id ? memberName.get(m.host_member_id) : null
                 }
                 members={members ?? []}
+                timezone={me.forum.timezone}
               />
             ))}
           </ul>
@@ -135,6 +139,7 @@ export default async function AdminMeetingsPage() {
                   m.host_member_id ? memberName.get(m.host_member_id) : null
                 }
                 members={members ?? []}
+                timezone={me.forum.timezone}
               />
             ))}
           </ul>
@@ -154,16 +159,17 @@ type MeetingRowProps = {
   }
   hostName: string | null | undefined
   members: { id: string; name: string }[]
+  timezone: string
 }
 
-function MeetingRow({ meeting, hostName, members }: MeetingRowProps) {
+function MeetingRow({ meeting, hostName, members, timezone }: MeetingRowProps) {
   return (
     <li>
       <Card>
         <CardContent className="flex items-start justify-between gap-2 py-3 text-sm">
           <div className="space-y-0.5">
             <p className="font-medium">
-              {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
+              {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy · h:mm a", timezone)}
             </p>
             <p className="text-xs text-muted-foreground">
               📍 {meeting.location ?? "TBD"}
@@ -172,7 +178,7 @@ function MeetingRow({ meeting, hostName, members }: MeetingRowProps) {
             </p>
           </div>
           <div className="flex items-center gap-1">
-            <EditMeetingDialog meeting={meeting} members={members} />
+            <EditMeetingDialog meeting={meeting} members={members} timezone={timezone} />
             <form action={deleteMeeting}>
               <input type="hidden" name="id" value={meeting.id} />
               <Button

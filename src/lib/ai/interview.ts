@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 import { z } from "zod"
 
+import { aiMetadata, checkAiBudget } from "@/lib/ai/limits"
 import { AI_MODEL } from "@/lib/ai/model"
 import type {
   InterviewCoverage,
@@ -188,6 +189,8 @@ export async function interviewTurn(input: {
   }
 
   const me = await requireCurrentMember()
+  const budget = await checkAiBudget(me)
+  if (!budget.ok) return { ok: false, error: budget.error }
 
   // Validate the draft the same way the generator does: a malformed draft is
   // an error, never silently treated as "no draft".
@@ -303,6 +306,7 @@ Decide the next turn and return the JSON.`
         // adaptive thinking room without risking truncation.
         max_tokens: 2048,
         thinking: { type: "adaptive" },
+        metadata: aiMetadata(me),
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userPrompt }],
         output_config: {
@@ -348,6 +352,14 @@ Decide the next turn and return the JSON.`
       { signal: AbortSignal.timeout(110_000) }
     )
 
+    // Counted the moment it's billed, usable answer or not.
+    await supabase.from("ai_interactions").insert({
+      member_id: me.id,
+      kind: refining ? "interview_turn_refine" : "interview_turn",
+      tokens_in: response.usage.input_tokens,
+      tokens_out: response.usage.output_tokens,
+    })
+
     if (response.stop_reason === "max_tokens") {
       console.warn("[interview] response truncated at max_tokens", { member: me.id })
       return { ok: false, error: "That answer got cut off on my side. Could you say it again?" }
@@ -377,13 +389,6 @@ Decide the next turn and return the JSON.`
       action = "ask"
       question = "Before I put anything together — what's been most alive for you this month?"
     }
-
-    await supabase.from("ai_interactions").insert({
-      member_id: me.id,
-      kind: refining ? "interview_turn_refine" : "interview_turn",
-      tokens_in: response.usage.input_tokens,
-      tokens_out: response.usage.output_tokens,
-    })
 
     const coverage: InterviewCoverage = turn.coverage
     return { ok: true, turn: { action, question, coverage, note: turn.note } }

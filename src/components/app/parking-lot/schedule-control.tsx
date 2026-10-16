@@ -28,6 +28,8 @@ type Props = {
   currentMeetingId: string | null
   status: string
   upcomingMeetings: MeetingChoice[]
+  /** The forum's IANA timezone (meeting times are shown in it). */
+  timezone: string
 }
 
 export function ScheduleControl({
@@ -35,6 +37,7 @@ export function ScheduleControl({
   currentMeetingId,
   status,
   upcomingMeetings,
+  timezone,
 }: Props) {
   const [pending, startTransition] = useTransition()
   const [picked, setPicked] = useState<string>(
@@ -78,7 +81,7 @@ export function ScheduleControl({
   const pickedLabel = (() => {
     const m = upcomingMeetings.find((x) => x.id === picked)
     if (!m) return "Pick a meeting"
-    return `${formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a")}${m.location ? ` · ${m.location}` : ""}`
+    return `${formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a", timezone)}${m.location ? ` · ${m.location}` : ""}`
   })()
 
   return (
@@ -95,7 +98,7 @@ export function ScheduleControl({
           <SelectContent>
             {upcomingMeetings.map((m) => (
               <SelectItem key={m.id} value={m.id}>
-                {formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
+                {formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a", timezone)}
                 {m.location ? ` · ${m.location}` : ""}
               </SelectItem>
             ))}

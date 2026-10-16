@@ -198,7 +198,7 @@ export default async function ParkingLotItemPage({
             <h2 className="text-sm font-semibold">Scheduled for</h2>
             <Card>
               <CardContent className="py-3 text-sm">
-                {formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a")}
+                {formatMeeting(m.scheduled_at, "EEE MMM d, yyyy · h:mm a", me.forum.timezone)}
                 {m.location ? ` · ${m.location}` : ""}
               </CardContent>
             </Card>
@@ -212,6 +212,7 @@ export default async function ParkingLotItemPage({
           itemId={item.id}
           currentMeetingId={item.scheduled_meeting_id}
           status={item.status}
+          timezone={me.forum.timezone}
           upcomingMeetings={(upcomingMeetings ?? []).filter(
             (m) => m.status === "upcoming" || m.status === "in_progress"
           )}

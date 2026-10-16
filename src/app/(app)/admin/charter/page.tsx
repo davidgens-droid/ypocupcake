@@ -1,19 +1,14 @@
 import { format, parseISO } from "date-fns"
+import { redirect } from "next/navigation"
 
-import { Button } from "@/components/ui/button"
+import { CharterForm } from "@/components/app/admin/charter-form"
 import { Card, CardContent } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { saveCharter } from "@/lib/admin/actions"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
 export default async function AdminCharterPage() {
   const me = await requireCurrentMember()
-  if (!me.is_admin) {
-    const { redirect } = await import("next/navigation")
-    redirect("/admin/meetings")
-  }
+  if (!me.is_admin) redirect("/admin/meetings")
   const supabase = await createClient()
 
   const { data: forum } = await supabase
@@ -26,7 +21,7 @@ export default async function AdminCharterPage() {
     charter?: string
     charter_updated_at?: string
   }
-  const charter = settings.charter ?? ""
+  const charter = typeof settings.charter === "string" ? settings.charter : ""
 
   return (
     <div className="space-y-4">
@@ -44,23 +39,7 @@ export default async function AdminCharterPage() {
         )}
       </div>
 
-      <form action={saveCharter} className="space-y-3">
-        <div className="space-y-2">
-          <Label htmlFor="charter">Charter text</Label>
-          <Textarea
-            id="charter"
-            name="charter"
-            rows={20}
-            defaultValue={charter}
-            placeholder={`Our purpose\n— Why this forum exists\n\nConfidentiality\n— What stays in forum\n\nAttendance\n— Expectations\n\n…`}
-            className="font-mono text-sm"
-          />
-          <p className="text-xs text-muted-foreground">
-            Plain text. Line breaks are preserved when displayed to members.
-          </p>
-        </div>
-        <Button type="submit">Save charter</Button>
-      </form>
+      <CharterForm initial={charter} />
 
       {charter && (
         <Card>

@@ -94,7 +94,7 @@ export default async function ParkingLotReviewPage({
           Review parking-lot topics
         </h1>
         <p className="text-sm text-muted-foreground">
-          {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy")} · Decide what
+          {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy", me.forum.timezone)} · Decide what
           to do with everything captured tonight.
         </p>
       </header>

@@ -69,7 +69,10 @@ function LoginPageInner() {
     }
 
     // Membership check is also done in the server callback; mirror it here
-    // so we can surface a helpful error before redirecting.
+    // so we can surface a helpful error before redirecting. my_forum_status()
+    // answers for ANY membership state (a removed member, or a member of a
+    // suspended forum, can't read their own members row under RLS, but they
+    // still belong somewhere and get the page that explains why).
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -78,19 +81,22 @@ function LoginPageInner() {
       toast.error("Sign-in returned no user.")
       return
     }
-    const { data: member } = await supabase
-      .from("members")
-      .select("id")
-      .eq("id", user.id)
-      .maybeSingle()
-    if (!member) {
+    const { data: status } = await supabase.rpc("my_forum_status").maybeSingle()
+    if (!status) {
       await supabase.auth.signOut()
       setPending(false)
       toast.error(ERROR_MESSAGES.not_invited)
       return
     }
+    const row = status as { forum_status: string; member_status: string }
+    const destination =
+      row.member_status === "removed"
+        ? "/removed"
+        : row.forum_status !== "active"
+          ? "/suspended"
+          : "/dashboard"
 
-    router.push("/dashboard")
+    router.push(destination)
     router.refresh()
   }
 

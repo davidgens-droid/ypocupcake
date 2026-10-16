@@ -81,7 +81,7 @@ export default async function UpdatePage() {
     if (parsed.success) initialContent = parsed.data
   }
 
-  const meetingLabel = formatMeeting(nextMeeting.scheduled_at, "EEE MMM d")
+  const meetingLabel = formatMeeting(nextMeeting.scheduled_at, "EEE MMM d", me.forum.timezone)
 
   return (
     <UpdateBuilder

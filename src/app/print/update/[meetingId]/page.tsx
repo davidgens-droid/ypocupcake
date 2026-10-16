@@ -86,7 +86,7 @@ export default async function PrintUpdatePage({
     ])
   )
 
-  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy")
+  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy", me.forum.timezone)
 
   return (
     <>
@@ -106,7 +106,7 @@ export default async function PrintUpdatePage({
       <article className="print-page">
         <h1>YPO Update — {me.name}</h1>
         <div className="meta">
-          {meetingDate}
+          {me.forum.name} · {meetingDate}
           {meeting.location ? ` · ${meeting.location}` : ""}
           {update?.completed_at && (
             <>

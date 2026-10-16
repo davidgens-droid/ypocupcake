@@ -33,7 +33,7 @@ export default async function QolHistoryPage() {
         </p>
       </header>
 
-      <QolHistory rows={rows} nowMs={nowMs} />
+      <QolHistory rows={rows} nowMs={nowMs} timezone={me.forum.timezone} />
     </div>
   )
 }

@@ -40,7 +40,16 @@ const TIMEFRAMES: { value: string; label: string; months: number | null }[] = [
   { value: "3", label: "Past 3 months", months: 3 },
 ]
 
-export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
+export function QolHistory({
+  rows,
+  nowMs,
+  timezone,
+}: {
+  rows: QolRow[]
+  nowMs: number
+  /** The forum's IANA timezone: column headers are meeting dates in it. */
+  timezone: string
+}) {
   const [timeframe, setTimeframe] = useState("12")
 
   const { members, meetings, lookup } = useMemo(() => {
@@ -78,7 +87,7 @@ export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
 
   function exportXlsx() {
     const dateHeaders = meetings.map((m) =>
-      formatMeeting(m.scheduled_at, "d-MMM-yyyy")
+      formatMeeting(m.scheduled_at, "d-MMM-yyyy", timezone)
     )
     const grid: (string | number | null)[][] = []
     grid.push(["Name", ...dateHeaders])
@@ -146,9 +155,9 @@ export function QolHistory({ rows, nowMs }: { rows: QolRow[]; nowMs: number }) {
                   <th
                     key={m.id}
                     className="min-w-[3.5rem] px-2 py-2 text-center font-semibold whitespace-nowrap"
-                    title={formatMeeting(m.scheduled_at, "EEE MMM d, yyyy")}
+                    title={formatMeeting(m.scheduled_at, "EEE MMM d, yyyy", timezone)}
                   >
-                    {formatMeeting(m.scheduled_at, "d-MMM")}
+                    {formatMeeting(m.scheduled_at, "d-MMM", timezone)}
                   </th>
                 ))}
               </tr>

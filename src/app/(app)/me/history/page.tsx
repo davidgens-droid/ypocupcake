@@ -74,7 +74,7 @@ export default async function PastUpdatesPage() {
       ) : (
         <ul className="space-y-2">
           {past.map((row) => (
-            <PastUpdateCard key={row.meeting_id} row={row} />
+            <PastUpdateCard key={row.meeting_id} row={row} timezone={me.forum.timezone} />
           ))}
         </ul>
       )}
@@ -82,7 +82,7 @@ export default async function PastUpdatesPage() {
   )
 }
 
-function PastUpdateCard({ row }: { row: UpdateRow }) {
+function PastUpdateCard({ row, timezone }: { row: UpdateRow; timezone: string }) {
   const meeting = row.meetings!
   let content: UpdateContent = emptyUpdateContent
   if (row.content) {
@@ -102,7 +102,7 @@ function PastUpdateCard({ row }: { row: UpdateRow }) {
         <CardContent className="flex items-center justify-between gap-3 py-3 text-sm">
           <div className="min-w-0 space-y-0.5">
             <p className="font-medium">
-              {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy")}
+              {formatMeeting(meeting.scheduled_at, "EEE MMM d, yyyy", timezone)}
             </p>
             <p className="text-xs text-muted-foreground">
               {meeting.location ?? "TBD"}

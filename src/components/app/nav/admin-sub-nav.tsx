@@ -10,6 +10,7 @@ const ALL_ITEMS = [
   { href: "/admin/roles", label: "Roles", match: /^\/admin\/roles/, adminOnly: true },
   { href: "/admin/meetings", label: "Calendar", match: /^\/admin\/meetings/, adminOnly: false },
   { href: "/admin/charter", label: "Charter", match: /^\/admin\/charter/, adminOnly: true },
+  { href: "/admin/settings", label: "Settings", match: /^\/admin\/settings/, adminOnly: true },
 ]
 
 export function AdminSubNav({ isAdmin = true }: { isAdmin?: boolean }) {

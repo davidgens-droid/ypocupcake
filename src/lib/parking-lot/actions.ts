@@ -405,7 +405,7 @@ export async function mergeCapturedIntoParked(
   }
 
   const merged =
-    (await mergeParkingLotItemsAI(capturedInput, targetInput)) ??
+    (await mergeParkingLotItemsAI(me, capturedInput, targetInput)) ??
     deterministicMerge(capturedInput, targetInput)
 
   const meetingId = captured.captured_meeting_id

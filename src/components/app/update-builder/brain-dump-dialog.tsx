@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react"
 import { useSearchParams } from "next/navigation"
 import { Loader2, MessageCircleQuestion, Mic, Sparkles, Square } from "lucide-react"
 import { toast } from "sonner"
@@ -73,6 +73,12 @@ const THINKING_MESSAGES = [
   "Almost there…",
 ]
 
+// Browser capability, read through useSyncExternalStore: `false` on the
+// server, the real answer on the client, with no effect-driven re-render.
+const subscribeNever = () => () => {}
+const hasSpeechRecognition = () => !!getSpeechRecognitionCtor()
+const hasSpeechRecognitionOnServer = () => false
+
 export function BrainDumpDialog({
   currentContent,
   onContentReady,
@@ -95,27 +101,33 @@ export function BrainDumpDialog({
   const [text, setText] = useState("")
   const [interim, setInterim] = useState("")
   const [recording, setRecording] = useState(false)
-  const [supportsVoice, setSupportsVoice] = useState(false)
+  const supportsVoice = useSyncExternalStore(
+    subscribeNever,
+    hasSpeechRecognition,
+    hasSpeechRecognitionOnServer
+  )
   const [pending, startTransition] = useTransition()
-  const [thinkingMsg, setThinkingMsg] = useState(THINKING_MESSAGES[0])
 
   // Cycle thinking messages while pending so the dialog doesn't feel frozen.
+  // The index resets to the first message each time a generation starts
+  // (adjusted during render, per React's "storing information from previous
+  // renders" pattern) and advances from the interval's callback only.
+  const [thinkingIdx, setThinkingIdx] = useState(0)
+  const [wasPending, setWasPending] = useState(false)
+  if (pending !== wasPending) {
+    setWasPending(pending)
+    if (pending) setThinkingIdx(0)
+  }
   useEffect(() => {
     if (!pending) return
-    setThinkingMsg(THINKING_MESSAGES[0])
-    let i = 0
     const id = setInterval(() => {
-      i = (i + 1) % THINKING_MESSAGES.length
-      setThinkingMsg(THINKING_MESSAGES[i])
+      setThinkingIdx((i) => (i + 1) % THINKING_MESSAGES.length)
     }, 2200)
     return () => clearInterval(id)
   }, [pending])
+  const thinkingMsg = THINKING_MESSAGES[thinkingIdx]
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-
-  useEffect(() => {
-    setSupportsVoice(!!getSpeechRecognitionCtor())
-  }, [])
 
   function startRecording() {
     const Ctor = getSpeechRecognitionCtor()

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import type { EmailOtpType } from "@supabase/supabase-js"
 
+import { getMembershipStatus } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
 
 export async function GET(request: Request) {
@@ -45,7 +46,9 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`)
   }
 
-  // Confirm the user has a member row (i.e. was invited).
+  // Confirm the user belongs to a forum. A removed member, or a member of a
+  // suspended forum, still has a membership — they get the page that says
+  // why they can't get in, not a "never invited" sign-out.
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -53,16 +56,13 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?error=no_user`)
   }
 
-  const { data: member } = await supabase
-    .from("members")
-    .select("id")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (!member) {
+  const status = await getMembershipStatus()
+  if (status.kind === "none") {
     await supabase.auth.signOut()
     return NextResponse.redirect(`${origin}/login?error=not_invited`)
   }
+  if (status.kind === "removed") return NextResponse.redirect(`${origin}/removed`)
+  if (status.kind === "suspended") return NextResponse.redirect(`${origin}/suspended`)
 
   return NextResponse.redirect(`${origin}${next}`)
 }

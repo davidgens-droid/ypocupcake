@@ -67,14 +67,16 @@ function NavLink({
   )
 }
 
-export function AppSidebar() {
+export function AppSidebar({ forumName }: { forumName: string }) {
   const pathname = usePathname()
 
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-background px-4 py-6 md:flex md:flex-col">
       <div className="px-2 pb-6">
-        <p className="font-heading text-base font-semibold">Cupcake</p>
-        <p className="text-xs text-muted-foreground">Forum companion</p>
+        <p className="truncate font-heading text-base font-semibold" title={forumName}>
+          {forumName}
+        </p>
+        <p className="text-xs text-muted-foreground">Cupcake · forum companion</p>
       </div>
       <nav className="flex flex-col gap-1">
         {NAV_ITEMS.map((item) => (

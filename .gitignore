@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# live-database catalog dumps (Phase 0 reconciliation; local only)
+docs/superpowers/plans/catalog-*.csv
+
 # vercel
 .vercel
 

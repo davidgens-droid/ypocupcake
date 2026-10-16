@@ -10,7 +10,6 @@ import {
   updateContentSchema,
   type UpdateContent,
 } from "@/lib/updates/schema"
-import type { ExplorationFormatCode } from "@/lib/types/domain"
 
 export async function emailUpdateToSelf(input: { meetingId: string }) {
   if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM_EMAIL) {
@@ -58,10 +57,11 @@ export async function emailUpdateToSelf(input: { meetingId: string }) {
     ])
   )
 
-  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy")
-  const subject = `Your Cupcake update — ${meetingDate}`
+  const meetingDate = formatMeeting(meeting.scheduled_at, "EEE, MMM d, yyyy", me.forum.timezone)
+  const subject = `Your ${me.forum.name} update — ${meetingDate}`
   const html = renderHtml({
     name: me.name,
+    forumName: me.forum.name,
     meetingDate,
     location: meeting.location,
     completedAt: update?.completed_at ?? null,
@@ -105,6 +105,7 @@ export async function emailUpdateToSelf(input: { meetingId: string }) {
 // ─── HTML renderer (inline styles only — email clients strip <style>) ──────
 function renderHtml(args: {
   name: string
+  forumName: string
   meetingDate: string
   location: string | null
   completedAt: string | null
@@ -112,7 +113,7 @@ function renderHtml(args: {
   content: UpdateContent
   formatLabel: Map<string, string>
 }) {
-  const { name, meetingDate, location, completedAt, ready, content, formatLabel } = args
+  const { name, forumName, meetingDate, location, completedAt, ready, content, formatLabel } = args
 
   const sFamily = "font-family:Arial,Helvetica,sans-serif"
   const sBody = `${sFamily};color:#000;font-size:13px;line-height:1.45;max-width:640px;margin:0 auto;padding:24px;`
@@ -182,7 +183,7 @@ function renderHtml(args: {
 <body style="${sBody}">
   <h1 style="${sFamily};font-size:22px;margin:0 0 4px 0;">YPO Update — ${escape(name)}</h1>
   <div style="${sFamily};font-size:11px;${sMuted};margin-bottom:16px;">
-    ${meetingDate}
+    ${escape(forumName)} · ${meetingDate}
     ${location ? ` · ${escape(location)}` : ""}
     ${completedAt ? ` · finalized ${format(parseISO(completedAt), "MMM d, yyyy")}` : ""}
     ${ready ? `<span style="${sBadge}">READY</span>` : ""}

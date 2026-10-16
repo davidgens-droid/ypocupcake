@@ -135,6 +135,9 @@ function friendlyRpcError(message: string): string {
   if (message.includes("cannot_remove_self")) return "You can't remove yourself."
   if (message.includes("member_not_in_forum")) return "That member isn't in your forum."
   if (message.includes("not_admin")) return "Admins only."
+  if (message.includes("invalid_name")) return "Give the forum a name between 2 and 80 characters."
+  if (message.includes("invalid_timezone")) return "That timezone isn't recognised. Pick one from the list."
+  if (message.includes("charter_too_long")) return "The charter is over 50,000 characters."
   return message
 }
 
@@ -221,7 +224,7 @@ export async function createMeeting(formData: FormData) {
   })
 
   const supabase = await createClient()
-  const isoDate = forumLocalInputToISO(parsed.scheduled_at_local)
+  const isoDate = forumLocalInputToISO(parsed.scheduled_at_local, me.forum.timezone)
   const { error } = await supabase.from("meetings").insert({
     forum_id: me.forum_id,
     scheduled_at: isoDate,
@@ -239,7 +242,7 @@ const updateMeetingSchema = newMeetingSchema.extend({
 })
 
 export async function updateMeeting(formData: FormData) {
-  await ensureMeetingManager()
+  const me = await ensureMeetingManager()
   const parsed = updateMeetingSchema.parse({
     id: formData.get("id"),
     scheduled_at_local: formData.get("scheduled_at_local"),
@@ -252,7 +255,7 @@ export async function updateMeeting(formData: FormData) {
   const { error } = await supabase
     .from("meetings")
     .update({
-      scheduled_at: forumLocalInputToISO(parsed.scheduled_at_local),
+      scheduled_at: forumLocalInputToISO(parsed.scheduled_at_local, me.forum.timezone),
       location: parsed.location.trim() || null,
       host_member_id: parsed.host_member_id || null,
       status: parsed.status,
@@ -273,34 +276,58 @@ export async function deleteMeeting(formData: FormData) {
   revalidatePath("/dashboard")
 }
 
-// ─── Charter ────────────────────────────────────────────────────────────────
+// ─── Forum settings (name, timezone, charter) ───────────────────────────────
+//
+// User sessions have no UPDATE grant on `forums` at all (0020): the only
+// write path is the same-forum-admin RPC update_forum_settings(), which
+// validates the timezone against Postgres' own zone table and stamps the
+// charter's updated_at/by itself.
+
 const charterSchema = z.object({
   charter: z.string().max(50_000),
 })
 
-export async function saveCharter(formData: FormData) {
-  const me = await ensureAdmin()
-  const parsed = charterSchema.parse({ charter: formData.get("charter") ?? "" })
+export async function saveCharter(input: { charter: string }): Promise<ActionResult> {
+  await ensureAdmin()
+  const parsed = charterSchema.safeParse({ charter: input.charter ?? "" })
+  if (!parsed.success) return { ok: false, error: "The charter is over 50,000 characters." }
 
   const supabase = await createClient()
-  // Charter lives in `forums.settings_json.charter` for V1 simplicity.
-  const { data: forum } = await supabase
-    .from("forums")
-    .select("settings")
-    .eq("id", me.forum_id)
-    .single()
+  const { error } = await supabase.rpc("update_forum_settings", {
+    p_charter: parsed.data.charter,
+  })
+  if (error) return { ok: false, error: friendlyRpcError(error.message) }
+  revalidatePath("/admin/charter")
+  return { ok: true }
+}
 
-  const next = {
-    ...((forum?.settings as Record<string, unknown>) ?? {}),
-    charter: parsed.charter,
-    charter_updated_at: new Date().toISOString(),
-    charter_updated_by: me.id,
+// The timezone is validated by the RPC (against Postgres' zone table and the
+// canonical Area/Location shape), not here: a runtime whose Intl list is
+// older than the stored zone must still let the admin rename the forum.
+const forumSettingsSchema = z.object({
+  name: z.string().trim().min(2, "Give the forum a name (2–80 characters).").max(80, "Keep the name under 80 characters."),
+  timezone: z.string().trim().min(1, "Pick a timezone.").max(64, "Pick a timezone from the list."),
+})
+
+export async function saveForumSettings(input: {
+  name: string
+  timezone: string
+}): Promise<ActionResult> {
+  await ensureAdmin()
+  const parsed = forumSettingsSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Check the form and try again." }
   }
 
-  const { error } = await supabase
-    .from("forums")
-    .update({ settings: next })
-    .eq("id", me.forum_id)
-  if (error) throw new Error(error.message)
-  revalidatePath("/admin/charter")
+  const supabase = await createClient()
+  const { error } = await supabase.rpc("update_forum_settings", {
+    p_name: parsed.data.name,
+    p_timezone: parsed.data.timezone,
+  })
+  if (error) return { ok: false, error: friendlyRpcError(error.message) }
+
+  // The name is in the shell (sidebar/header) and meeting times are
+  // rendered in the zone on every page: refresh the whole tree.
+  revalidatePath("/", "layout")
+  return { ok: true }
 }

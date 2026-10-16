@@ -31,7 +31,7 @@ export default async function AdminLayout({
         </h1>
         <p className="text-sm text-muted-foreground">
           {me.is_admin
-            ? "Manage Cupcake's members, roles, calendar, and charter."
+            ? `Manage ${me.forum.name}'s members, roles, calendar, charter, and settings.`
             : "Manage the meeting calendar."}
         </p>
       </header>

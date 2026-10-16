@@ -156,7 +156,10 @@ RPCs raise with stable codes (`already_member`, `invalid_token`, `expired`, `rev
 9. `forum_qol_history()` returns only same-forum rows and only to the three roles;
 10. `create_forum` refuses an existing member; `join_forum` refuses expired/revoked/exhausted/foreign-forum-member; `peek_invite` leaks nothing but the name;
 11. platform RPCs refuse non-platform users; `platform_forum_stats` returns no member-level columns;
-12. `grep -r SUPABASE_SERVICE_ROLE_KEY src/` is empty.
+12. `grep -r SUPABASE_SERVICE_ROLE_KEY src/` is empty;
+13. `my_forum_status()` returns only `(forum_name, forum_status, member_status)`: `removed` for a removed member, `suspended` for a member of a suspended forum; refuses anon;
+14. `update_forum_settings` refuses non-admins, unknown timezones, and admins of a suspended forum; changes land on the caller's forum only; a direct `UPDATE forums` (name or status) from any user session is refused;
+15. `forum_ai_calls_today()` counts only the caller's forum and returns a bare integer.
 
 Plus adversarial review workflows per phase and a browser smoke test (sign up → create → invite link → join from a second profile) against the test project.
 

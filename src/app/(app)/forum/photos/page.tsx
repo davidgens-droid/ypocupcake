@@ -44,7 +44,7 @@ export default async function PhotoGalleryPage() {
         <div>
           <h1 className="font-heading text-2xl font-semibold">Photo Gallery</h1>
           <p className="text-sm text-muted-foreground">
-            Forum-shared. Uploads are private to Cupcake.
+            Shared with your forum only. Nothing here is public.
           </p>
         </div>
         <Button size="sm" render={<Link href="/forum/photos/new" />}>
