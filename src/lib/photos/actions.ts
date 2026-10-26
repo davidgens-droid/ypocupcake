@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { requireCurrentMember } from "@/lib/auth/current-member"
-import { notifyMember } from "@/lib/notifications/actions"
+import { notifyForum, notifyMember } from "@/lib/notifications/actions"
+import { MAX_PHOTOS_PER_UPLOAD } from "@/lib/photos/limits"
 import { createClient } from "@/lib/supabase/server"
 
 const recordSchema = z.object({
@@ -42,6 +43,46 @@ export async function recordPhoto(input: z.infer<typeof recordSchema>) {
   if (error) throw new Error(error.message)
   revalidatePath("/forum/photos")
   return { id: data.id as string }
+}
+
+const uploadedSchema = z.object({ photoIds: z.array(z.string().uuid()).min(1).max(MAX_PHOTOS_PER_UPLOAD) })
+
+/**
+ * Tell the rest of the forum about a finished upload: ONE notification per
+ * member for the whole batch, not one per photo. Only photos the caller
+ * actually uploaded count (the ids are checked, not trusted), so the
+ * message can't claim more than happened. Failures here never fail the
+ * upload itself.
+ */
+export async function notifyPhotosUploaded(input: { photoIds: string[] }): Promise<{ ok: boolean; notified: number }> {
+  const me = await requireCurrentMember()
+  const parsed = uploadedSchema.safeParse(input)
+  if (!parsed.success) return { ok: false, notified: 0 }
+
+  const supabase = await createClient()
+  const { data: mine } = await supabase
+    .from("photos")
+    .select("id, caption, uploaded_at")
+    .in("id", parsed.data.photoIds)
+    .eq("uploader_member_id", me.id)
+    .eq("forum_id", me.forum_id)
+    .order("uploaded_at", { ascending: false })
+  const photos = mine ?? []
+  if (photos.length === 0) return { ok: false, notified: 0 }
+
+  const caption = photos.find((p) => p.caption)?.caption?.trim() || null
+  const single = photos.length === 1
+  const detail = single ? caption : `${photos.length} photos${caption ? ` · ${caption}` : ""}`
+  try {
+    const notified = await notifyForum({
+      kind: single ? "photo_added" : "photos_added",
+      detail: detail ? detail.slice(0, 140) : undefined,
+      link: single ? `/forum/photos/${photos[0].id}` : "/forum/photos",
+    })
+    return { ok: true, notified }
+  } catch {
+    return { ok: false, notified: 0 }
+  }
 }
 
 export async function deletePhoto(formData: FormData) {

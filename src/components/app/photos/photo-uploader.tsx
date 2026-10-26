@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { createClient } from "@/lib/supabase/client"
-import { recordPhoto } from "@/lib/photos/actions"
+import { notifyPhotosUploaded, recordPhoto } from "@/lib/photos/actions"
+import { MAX_PHOTOS_PER_UPLOAD } from "@/lib/photos/limits"
 
 type Props = {
   forumId: string
@@ -56,6 +57,9 @@ export function PhotoUploader({ forumId, uploaderId }: Props) {
   const [caption, setCaption] = useState("")
   const [pending, startTransition] = useTransition()
   const inputRef = useRef<HTMLInputElement>(null)
+  // Photos that went in during a batch that didn't finish: announced together
+  // with the rest once the member retries (or when they leave), never twice.
+  const unannounced = useRef<string[]>([])
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []).filter((f) =>
@@ -65,8 +69,25 @@ export function PhotoUploader({ forumId, uploaderId }: Props) {
       file,
       preview: URL.createObjectURL(file),
     }))
-    setItems((prev) => [...prev, ...next])
+    setItems((prev) => {
+      const room = Math.max(0, MAX_PHOTOS_PER_UPLOAD - prev.length)
+      if (next.length > room) {
+        toast.info(`Up to ${MAX_PHOTOS_PER_UPLOAD} photos per upload. The first ${room} were added; upload those, then add the rest.`)
+        for (const p of next.slice(room)) URL.revokeObjectURL(p.preview)
+      }
+      return [...prev, ...next.slice(0, room)]
+    })
     if (inputRef.current) inputRef.current.value = ""
+  }
+
+  async function announce(ids: string[]) {
+    if (ids.length === 0) return
+    try {
+      await notifyPhotosUploaded({ photoIds: ids })
+      unannounced.current = []
+    } catch {
+      // The gallery still shows them; the bell is a courtesy.
+    }
   }
 
   function removeAt(i: number) {
@@ -76,7 +97,7 @@ export function PhotoUploader({ forumId, uploaderId }: Props) {
     })
   }
 
-  async function uploadOne(p: Pending) {
+  async function uploadOne(p: Pending): Promise<string> {
     const supabase = createClient()
     const blob = await stripExifAndShrink(p.file)
     const id = crypto.randomUUID()
@@ -91,26 +112,55 @@ export function PhotoUploader({ forumId, uploaderId }: Props) {
       })
     if (error) throw error
 
-    await recordPhoto({
+    const recorded = await recordPhoto({
       storage_path: path,
       caption,
       tags: [],
     })
+    return recorded.id
   }
 
   function onUpload() {
     if (items.length === 0) return
     startTransition(async () => {
-      try {
-        for (const p of items) {
-          await uploadOne(p)
+      const done: Pending[] = []
+      let failure: string | null = null
+      for (const p of items) {
+        try {
+          unannounced.current.push(await uploadOne(p))
+          done.push(p)
+        } catch (err) {
+          failure = err instanceof Error ? err.message : "Upload failed."
+          break
         }
-        toast.success(`Uploaded ${items.length} photo${items.length === 1 ? "" : "s"}.`)
-        router.push("/forum/photos")
-        router.refresh()
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.")
       }
+      if (failure) {
+        // Stay here with the ones that didn't go in, so a retry finishes the
+        // batch; the forum hears about all of it once, after that.
+        setItems((prev) => prev.filter((p) => !done.includes(p)))
+        for (const p of done) URL.revokeObjectURL(p.preview)
+        toast.error(
+          done.length > 0
+            ? `${done.length} of ${items.length} uploaded, then: ${failure} The rest are still here — try again.`
+            : failure
+        )
+        return
+      }
+      // One "added photos" notification to the rest of the forum for the whole
+      // batch (including anything a failed earlier attempt already put in).
+      const count = unannounced.current.length
+      await announce(unannounced.current)
+      toast.success(`Uploaded ${count} photo${count === 1 ? "" : "s"}.`)
+      router.push("/forum/photos")
+      router.refresh()
+    })
+  }
+
+  function onCancel() {
+    // Photos from an unfinished batch are in the gallery already: announce them on the way out.
+    startTransition(async () => {
+      await announce(unannounced.current)
+      router.back()
     })
   }
 
@@ -174,7 +224,7 @@ export function PhotoUploader({ forumId, uploaderId }: Props) {
         <Button
           type="button"
           variant="ghost"
-          onClick={() => router.back()}
+          onClick={onCancel}
           disabled={pending}
         >
           Cancel

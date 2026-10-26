@@ -60,7 +60,26 @@ export async function markAllRead() {
   revalidatePath("/")
 }
 
-export type NotificationKind = "topic_added_on_behalf" | "photo_comment"
+export type NotificationKind = "topic_added_on_behalf" | "photo_comment" | "photo_added" | "photos_added"
+
+/** The kinds that may be fanned out to a whole forum (the database enforces the same list). */
+export type ForumNotificationKind = "photo_added" | "photos_added"
+
+/**
+ * One notification for every OTHER active member of the caller's forum,
+ * composed and validated exactly like notifyMember's (the RPC calls
+ * create_notification per recipient). Returns how many were notified.
+ */
+export async function notifyForum(args: { kind: ForumNotificationKind; detail?: string; link?: string }): Promise<number> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc("notify_forum_members", {
+    p_kind: args.kind,
+    p_detail: args.detail ?? null,
+    p_link: args.link ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return typeof data === "number" ? data : 0
+}
 
 /**
  * Insert a notification for another member of the caller's forum. The
