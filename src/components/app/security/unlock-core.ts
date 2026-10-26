@@ -137,9 +137,15 @@ export async function sweepLegacyUpdates(
 
 export async function makePasskeyWrap(
   uk: CryptoKey,
-  member: { id: string; email: string; name: string }
+  member: { id: string; email: string; name: string },
+  existing: KeyWrap[] = []
 ): Promise<WrapInput | null> {
-  const reg = await registerPasskeyWithPrf({ memberId: member.id, email: member.email, name: member.name })
+  const reg = await registerPasskeyWithPrf({
+    memberId: member.id,
+    email: member.email,
+    name: member.name,
+    excludeCredentialIds: existing.filter((w) => w.kind === "passkey" && w.credential_id).map((w) => w.credential_id!),
+  })
   if (!reg) return null
   const wk = await deriveWrappingKeyFromPrf(reg.prfOutput, b64urlDecode(reg.prfSalt))
   reg.prfOutput.fill(0)

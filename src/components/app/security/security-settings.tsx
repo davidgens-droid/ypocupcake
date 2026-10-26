@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/keys"
-import { biometricLabel, passkeyApiAvailable } from "@/lib/crypto/passkey"
+import { biometricLabel, describePasskeyError, platformAuthenticatorAvailable } from "@/lib/crypto/passkey"
 import { getKeySnapshot, lockKey, restoreKey, subscribeKey, type KeySnapshot } from "@/lib/crypto/session"
 import {
   addPasskeyWrap,
@@ -37,9 +37,6 @@ import {
   unlockWithRecovery,
 } from "./unlock-core"
 
-const subscribeNever = () => () => {}
-const passkeyOnClient = () => passkeyApiAvailable()
-const passkeyOnServer = () => false
 const SERVER_SNAPSHOT: KeySnapshot = { memberId: null, key: null, keyId: null, checked: false }
 const getServerSnapshot = () => SERVER_SNAPSHOT
 
@@ -47,7 +44,18 @@ const getServerSnapshot = () => SERVER_SNAPSHOT
 export function SecuritySettings({ member }: { member: GateMember }) {
   const router = useRouter()
   const snap = useSyncExternalStore(subscribeKey, getKeySnapshot, getServerSnapshot)
-  const canPasskey = useSyncExternalStore(subscribeNever, passkeyOnClient, passkeyOnServer)
+  // Only this device's own authenticator (Face ID, Touch ID, Windows Hello…) counts;
+  // a browser that could merely talk to a USB security key must not offer "Add this device".
+  const [canPasskey, setCanPasskey] = useState<boolean | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    platformAuthenticatorAvailable().then((ok) => {
+      if (!cancelled) setCanPasskey(ok)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [wraps, setWraps] = useState<KeyWrap[] | null>(null)
   const [unprotected, setUnprotected] = useState(0)
   const [lastReason, setLastReason] = useState<string | null>(null)
@@ -107,9 +115,15 @@ export function SecuritySettings({ member }: { member: GateMember }) {
       try {
         const uk = await freshKey(r)
         if (r.purpose === "passkey") {
-          const wrap = await makePasskeyWrap(uk, member)
+          let wrap
+          try {
+            wrap = await makePasskeyWrap(uk, member, wraps!)
+          } catch (err) {
+            toast.error(describePasskeyError(err), { duration: 15000 })
+            return
+          }
           if (!wrap) {
-            toast.info("This device can't use a passkey for this.")
+            toast.info(`${biometricLabel()} on this device can't protect updates yet (it lacks the passkey "PRF" feature). Use a passphrase on this device instead.`, { duration: 15000 })
             return
           }
           const res = await addPasskeyWrap(wrap)
@@ -262,11 +276,15 @@ export function SecuritySettings({ member }: { member: GateMember }) {
               ))}
             </ul>
           )}
-          {canPasskey && (
+          {canPasskey ? (
             <Button type="button" size="sm" variant="outline" className="gap-1" disabled={pending} onClick={() => begin("passkey")}>
               <Fingerprint className="size-4" /> Add this device ({biometricLabel()})
             </Button>
-          )}
+          ) : canPasskey === false ? (
+            <p className="text-xs text-muted-foreground">
+              This browser has no {biometricLabel()} to offer. Open www.ypocupcake.com in Chrome, Edge or Safari (not inside another app) to add this device, or rely on your passphrase here.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

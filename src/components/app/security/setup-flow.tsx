@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { generateUpdateKey, MIN_PASSPHRASE_LENGTH } from "@/lib/crypto/keys"
-import { biometricLabel, platformAuthenticatorAvailable } from "@/lib/crypto/passkey"
+import { biometricLabel, describePasskeyError, platformAuthenticatorAvailable } from "@/lib/crypto/passkey"
 import { setupMemberKeys, type WrapInput } from "@/lib/security/actions"
 
 import { RecoveryCodeCard } from "./recovery-code-card"
@@ -72,14 +72,14 @@ export function SetupFlow({
       try {
         const wrap = await makePasskeyWrap(await ensureKey(), member)
         if (!wrap) {
-          toast.info("This device can't use a passkey here yet — set a passphrase instead.")
+          toast.info(`${biometricLabel()} on this device can't protect updates yet (it lacks the passkey "PRF" feature) — set a passphrase instead. You can add other devices later.`, { duration: 15000 })
           setStage("passphrase")
           return
         }
         wraps.current = [wrap]
         await toRecovery()
-      } catch {
-        toast.info("The passkey step didn't complete. You can try again, or set a passphrase instead.")
+      } catch (err) {
+        toast.info(`${describePasskeyError(err)} You can also set a passphrase instead.`, { duration: 15000 })
       }
     })
   }

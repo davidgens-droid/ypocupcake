@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { biometricLabel, passkeyApiAvailable } from "@/lib/crypto/passkey"
+import { biometricLabel, describePasskeyError, passkeyApiAvailable } from "@/lib/crypto/passkey"
 import { touchKeyWrap, type KeyWrap } from "@/lib/security/actions"
 
 import type { GateMember } from "./unlock-gate"
@@ -40,7 +40,7 @@ export function UnlockPanel({ member, wraps, compact = false }: { member: GateMe
       try {
         await finish(await fn(), via)
       } catch (err) {
-        toast.error(err instanceof UnlockError ? err.message : "Couldn't unlock. Try again.")
+        toast.error(err instanceof UnlockError ? err.message : via === "passkey" ? describePasskeyError(err) : "Couldn't unlock. Try again.", { duration: 12000 })
       }
     })
   }

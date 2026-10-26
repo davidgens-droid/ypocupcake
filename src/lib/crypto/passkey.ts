@@ -79,15 +79,44 @@ function prfOf(cred: PublicKeyCredential): Uint8Array | null {
 }
 
 /**
- * Register a passkey on this device and evaluate PRF with a fresh salt.
- * Returns null when the authenticator doesn't support PRF (the caller then
- * offers the passphrase path). Registration is create → immediate get,
- * because some authenticators only evaluate PRF during an assertion.
+ * A plain-English reason for a failed passkey step, from the DOMException
+ * the browser raised. Shown to the member; no browser jargon.
+ */
+export function describePasskeyError(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : ""
+  switch (name) {
+    case "NotAllowedError":
+      return "No passkey was made: the request was cancelled, timed out, or this browser has no Face ID / Touch ID / Windows Hello to offer. If you're inside another app's browser, open www.ypocupcake.com in Chrome, Edge or Safari directly."
+    case "NotSupportedError":
+    case "NotReadableError":
+      return "This browser can't create a passkey for this device. Open www.ypocupcake.com in Chrome, Edge or Safari, or use a passphrase here."
+    case "InvalidStateError":
+      return "This device already holds a passkey for your account. Unlock with it instead, or remove it under Devices first."
+    case "SecurityError":
+      return "Passkeys only work on the real site address. Open www.ypocupcake.com directly."
+    case "AbortError":
+      return "The passkey step was interrupted. Try again."
+    default:
+      return "The passkey step didn't complete. Try again, or use a passphrase on this device."
+  }
+}
+
+/**
+ * Register a passkey on THIS device (its own Face ID / Touch ID / Windows
+ * Hello / screen lock — never a USB security key or another phone, which
+ * is what browsers offer when the attachment is left open) and evaluate
+ * PRF with a fresh salt. Returns null when the authenticator doesn't
+ * support PRF (the caller then offers the passphrase path). Registration
+ * is create → immediate get, because some authenticators only evaluate
+ * PRF during an assertion. Browser errors (cancelled, unsupported…)
+ * propagate; see describePasskeyError().
  */
 export async function registerPasskeyWithPrf(opts: {
   memberId: string
   email: string
   name: string
+  /** Credentials the member already has, so the same authenticator isn't enrolled twice. */
+  excludeCredentialIds?: string[]
 }): Promise<RegisteredPasskey | null> {
   if (!passkeyApiAvailable()) return null
   const rpId = window.location.hostname
@@ -102,7 +131,8 @@ export async function registerPasskeyWithPrf(opts: {
         { type: "public-key", alg: -7 },
         { type: "public-key", alg: -257 },
       ],
-      authenticatorSelection: { residentKey: "preferred", userVerification: "required" },
+      authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "preferred", userVerification: "required" },
+      excludeCredentials: (opts.excludeCredentialIds ?? []).map((id) => ({ type: "public-key" as const, id: toBuffer(b64urlDecode(id)) })),
       timeout: 120_000,
       extensions: { prf: { eval: { first: toBuffer(salt) } } } as AuthenticationExtensionsClientInputs,
     },
@@ -113,6 +143,11 @@ export async function registerPasskeyWithPrf(opts: {
   const publicKeyDer = typeof attestation.getPublicKey === "function" ? attestation.getPublicKey() : null
   const transports = typeof attestation.getTransports === "function" ? attestation.getTransports() : []
   const credentialId = b64urlEncode(new Uint8Array(created.rawId))
+
+  // The browser says outright when this authenticator can't do PRF: stop
+  // here rather than prompting again for nothing.
+  const prfExt = (created.getClientExtensionResults() as { prf?: PrfResults }).prf
+  if (prfExt && prfExt.enabled === false) return null
 
   // PRF from create, or from an immediate get with the same salt.
   let prfOutput = prfOf(created)
