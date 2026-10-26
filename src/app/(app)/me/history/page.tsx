@@ -42,12 +42,16 @@ export default async function PastUpdatesPage() {
   const all = rows ?? []
 
   // Only show updates whose meeting has already happened (or is happening now).
-  // The /me/update page handles the current upcoming meeting.
+  // The /me/update page handles the current upcoming meeting. Most recent
+  // meeting first: the row's updated_at is no guide (a bulk re-encryption
+  // touches every row at once).
   const now = new Date().getTime()
-  const past = all.filter((r) => {
-    if (!r.meetings) return false
-    return new Date(r.meetings.scheduled_at).getTime() < now
-  })
+  const past = all
+    .filter((r) => {
+      if (!r.meetings) return false
+      return new Date(r.meetings.scheduled_at).getTime() < now
+    })
+    .sort((a, b) => new Date(b.meetings!.scheduled_at).getTime() - new Date(a.meetings!.scheduled_at).getTime())
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
