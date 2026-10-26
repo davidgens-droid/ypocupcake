@@ -57,7 +57,7 @@ All primitives are WebCrypto (`crypto.subtle`); no custom crypto, no new crypto 
 ## 5. Data model — migration `0024_e2e_updates.sql`
 
 - `member_key_wraps` (`id uuid pk`, `member_id uuid not null references members(id) on delete cascade`, `kind text check (kind in ('passkey','passphrase','recovery'))`, `credential_id text unique` (passkey), `public_key text` (passkey, base64url COSE), `transports text[]`, `prf_salt bytea`, `kdf_salt bytea`, `kdf_iterations int`, `wrapped_key bytea not null`, `label text`, `created_at`, `last_used_at`). RLS: exactly one self-only `for all using (member_id = auth.uid()) with check (member_id = auth.uid())` policy, added to the suite's member-private list (§12.8). At most one `passphrase` and one `recovery` wrap per member (partial unique indexes).
-- `updates`: add `content_enc text`, `qol_physical int`, `qol_mental int`, `qol_financial int`, `qol_friends int` (each `check (between 1 and 10)`), `key_version int not null default 1`; `content` becomes nullable; constraint `updates_plain_xor_enc check (content is null or content_enc is null)`. One-off backfill of the four QoL columns from `content -> 'qol'` for every existing row.
+- `updates`: add `content_enc text`, `qol_physical int`, `qol_mental int`, `qol_financial int`, `qol_friends int` (each `check (between 1 and 10)`), `key_version int not null default 1`; `content` drops both `not null` and its `'{}'` default (otherwise an encrypted insert would get a plaintext default and trip the constraint); constraint `updates_plain_xor_enc check (content is null or content_enc is null)`. One-off backfill of the four QoL columns from `content -> 'qol'` for every existing row.
 - `ai_pattern_cards`: add `payload_enc text`; `title`/`detail`/`topic_suggestion` nullable; constraint `cards_plain_xor_enc check (title is null or payload_enc is null)`. **All existing cards are deleted** by the migration (they were derived from, and are as sensitive as, plaintext updates; they regenerate on the device).
 - `forum_qol_history()` rewritten to read the four columns (same signature, same role gate).
 - RPCs (SECURITY DEFINER, `set search_path = public`, revoke public/anon, grant authenticated, `auth.uid()` guard):
@@ -98,7 +98,7 @@ As in §3. Implementation notes: changing or adding a wrap requires the extracta
 
 ## 11. Rollout
 
-1. Owner runs `0024`. 2. Code is pushed. 3. Every member sees setup on their next visit to the builder or history; their device migrates their rows (batched 10 at a time). 4. The Platform page gains a per-forum "updates protected: n of m members" figure (counts of members with wraps vs active members) so the operator can see the residual. Members who never return keep readable rows; there is no server-side way to encrypt them.
+1. Owner runs `0024`. 2. Code is pushed. 3. Every member sees setup on their next visit to the builder or history; their device migrates their rows (batched 10 at a time). 4. `platform_forum_stats()` gains a `protected_count int` column (active members with at least one key wrap) and the Platform page shows "updates protected: n of m members" per forum, so the operator can see the residual. Members who never return keep readable rows; there is no server-side way to encrypt them.
 
 ## 12. Verification
 
