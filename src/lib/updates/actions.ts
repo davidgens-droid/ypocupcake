@@ -226,7 +226,12 @@ export async function migrateUpdates(
 ): Promise<ActionResult> {
   const me = await requireCurrentMember()
   const parsed = z.array(saveSchema).max(50).safeParse(rows)
-  if (!parsed.success) return { ok: false, error: "Bad migration payload." }
+  if (!parsed.success) {
+    // Say which field, so a device-side problem can be diagnosed from the toast alone.
+    const issue = parsed.error.issues[0]
+    const where = issue ? issue.path.filter((p) => typeof p === "string").join(".") || "row" : "row"
+    return { ok: false, error: `The protected copy didn't pass the server's checks (${where}).` }
+  }
   if (parsed.data.length === 0) return { ok: true }
   if (!(await assertCurrentKey(me.id, parsed.data[0].keyId)) || parsed.data.some((r) => r.keyId !== parsed.data[0].keyId)) {
     return { ok: false, error: STALE_KEY }
@@ -240,7 +245,7 @@ export async function migrateUpdates(
       .eq("member_id", me.id)
       .eq("meeting_id", r.meetingId)
       .is("content_enc", null)
-    if (error) return { ok: false, error: "Couldn't protect one of your past updates. Try again." }
+    if (error) return { ok: false, error: `The database refused the protected copy (${error.message}).` }
   }
   return { ok: true }
 }

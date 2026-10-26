@@ -7,7 +7,7 @@ import { UnlockGate, type GateMember } from "@/components/app/security/unlock-ga
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { decryptJson, EnvelopeError, updateAad } from "@/lib/crypto/content"
-import { emptyUpdateContent, updateContentSchema, type UpdateContent } from "@/lib/updates/schema"
+import { emptyUpdateContent, parseStoredUpdate, type UpdateContent } from "@/lib/updates/schema"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
 import { UpdateBuilder } from "./update-builder"
@@ -44,14 +44,8 @@ export function UpdateBuilderGate(props: Props) {
 
 async function open(key: CryptoKey, memberId: string, row: EncryptedUpdateRow | null): Promise<UpdateContent | null> {
   if (!row) return null
-  if (row.envelope) {
-    const parsed = updateContentSchema.safeParse(await decryptJson(key, row.envelope, updateAad(memberId, row.meetingId)))
-    return parsed.success ? parsed.data : null
-  }
-  if (row.legacy) {
-    const parsed = updateContentSchema.safeParse(row.legacy)
-    return parsed.success ? parsed.data : null
-  }
+  if (row.envelope) return parseStoredUpdate(await decryptJson(key, row.envelope, updateAad(memberId, row.meetingId)))
+  if (row.legacy) return parseStoredUpdate(row.legacy)
   return null
 }
 

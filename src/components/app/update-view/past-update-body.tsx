@@ -11,7 +11,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { decryptJson, EnvelopeError, updateAad } from "@/lib/crypto/content"
 import type { UpdateExportMeta } from "@/lib/updates/export-meta"
-import { updateContentSchema, type UpdateContent } from "@/lib/updates/schema"
+import { parseStoredUpdate, type UpdateContent } from "@/lib/updates/schema"
 
 type Props = {
   member: GateMember
@@ -39,9 +39,9 @@ export function useOpenedUpdate(cryptoKey: CryptoKey, memberId: string, meetingI
           return
         }
         const raw = envelope ? await decryptJson(cryptoKey, envelope, updateAad(memberId, meetingId)) : legacy
-        const parsed = updateContentSchema.safeParse(raw)
-        if (!parsed.success) throw new Error("bad shape")
-        if (!cancelled) setState({ kind: "ok", content: parsed.data })
+        const parsed = parseStoredUpdate(raw)
+        if (!parsed) throw new Error("bad shape")
+        if (!cancelled) setState({ kind: "ok", content: parsed })
       } catch (err) {
         if (!cancelled) {
           setState({

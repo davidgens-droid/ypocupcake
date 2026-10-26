@@ -68,13 +68,19 @@ function friendly(message: string): string {
 export async function getMyKeyWraps(): Promise<KeyWrap[]> {
   const me = await requireCurrentMember()
   const supabase = await createClient()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("member_key_wraps")
     .select("id, kind, credential_id, transports, prf_salt, kdf_salt, kdf_iterations, wrapped_key, label, key_id, created_at, last_used_at")
     .eq("member_id", me.id)
     .order("created_at", { ascending: true })
+  // Never report "no keys" because the read failed: the caller would offer a
+  // fresh setup to a member who already has one.
+  if (error) throw new Error("Couldn't load your protection settings.")
   return (data ?? []) as KeyWrap[]
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const DB_NOT_READY = "Cupcake's database is missing its latest update (0024). Ask your forum admin to apply it, then set up again."
 
 /** The id of the member's CURRENT update key, or null when not set up. */
 export async function getMyKeyId(): Promise<string | null> {
@@ -84,11 +90,11 @@ export async function getMyKeyId(): Promise<string | null> {
   return (data?.key_id as string | undefined) ?? null
 }
 
-export type SetupResult = { ok: true; keyId: string } | { ok: false; error: string; code?: "already_set_up" }
+export type SetupResult = { ok: true; keyId: string } | { ok: false; error: string; code?: "already_set_up" | "db_not_ready" }
 
 /** First-time setup: all wraps at once, atomically (RPC). Returns the new key id. */
 export async function setupMemberKeys(wraps: WrapInput[]): Promise<SetupResult> {
-  await requireCurrentMember()
+  const me = await requireCurrentMember()
   const parsed = z.array(wrapInputSchema).min(2).max(4).safeParse(wraps)
   if (!parsed.success) return { ok: false, error: "Something was wrong with the setup data. Please try again." }
   const supabase = await createClient()
@@ -100,8 +106,14 @@ export async function setupMemberKeys(wraps: WrapInput[]): Promise<SetupResult> 
       code: error.message.includes("already_set_up") ? "already_set_up" : undefined,
     }
   }
+  if (typeof data !== "string" || !UUID_RE.test(data)) {
+    // An older copy of migration 0024 (no key id) is in the database. Undo the
+    // half-setup so the member can simply try again once it is applied.
+    await supabase.from("member_key_wraps").delete().eq("member_id", me.id)
+    return { ok: false, error: DB_NOT_READY, code: "db_not_ready" }
+  }
   revalidatePath("/", "layout")
-  return { ok: true, keyId: String(data) }
+  return { ok: true, keyId: data }
 }
 
 /** Register another device's passkey (for the member's current key). */

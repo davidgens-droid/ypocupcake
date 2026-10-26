@@ -50,6 +50,7 @@ export function SecuritySettings({ member }: { member: GateMember }) {
   const canPasskey = useSyncExternalStore(subscribeNever, passkeyOnClient, passkeyOnServer)
   const [wraps, setWraps] = useState<KeyWrap[] | null>(null)
   const [unprotected, setUnprotected] = useState(0)
+  const [lastReason, setLastReason] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
   const [newRecovery, setNewRecovery] = useState<string | null>(null)
   const [resetWord, setResetWord] = useState("")
@@ -171,10 +172,13 @@ export function SecuritySettings({ member }: { member: GateMember }) {
       try {
         const r = await sweepLegacyUpdates(member.id, key, keyId)
         setUnprotected(r.remaining)
+        setLastReason(r.reason)
         if (r.remaining === 0) toast.success(`${r.total} past update${r.total === 1 ? "" : "s"} protected.`)
-        else toast.error(`${r.remaining} still couldn't be protected. Try again in a moment.`)
-      } catch {
-        toast.error("That didn't work. Try again in a moment.")
+        else toast.error(`${r.remaining} still couldn't be protected${r.reason ? `: ${r.reason}` : "."}`, { duration: 15000 })
+      } catch (err) {
+        const msg = err instanceof Error && err.message ? err.message : null
+        setLastReason(msg)
+        toast.error(`That didn't work${msg ? `: ${msg}` : "."} Try again in a moment.`, { duration: 15000 })
       }
     })
   }
@@ -210,6 +214,7 @@ export function SecuritySettings({ member }: { member: GateMember }) {
                 {pending ? "Working…" : "Protect now"}
               </Button>
             )}
+            {lastReason && <p className="basis-full text-xs text-destructive">Last attempt: {lastReason}</p>}
           </CardContent>
         </Card>
       )}

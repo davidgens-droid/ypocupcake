@@ -124,26 +124,38 @@ export function SetupFlow({
           router.refresh()
           return
         }
+        if (res.code === "db_not_ready") {
+          // The server undid the setup; this key and code are void. Back to the start.
+          uk.current = null
+          wraps.current = []
+          setRecoveryCode(null)
+          setStage("intro")
+          toast.error(res.error, { duration: 20000 })
+          return
+        }
         toast.error(res.error)
         setStage("recovery")
         return
       }
       // Existing updates: encrypt them here (idempotent; the gate retries later if anything is left).
       let leftover = 0
+      let reason: string | null = null
       try {
         const r = await sweepLegacyUpdates(member.id, key, res.keyId, (done, total) =>
           setProgress(`Protected ${done} of ${total} past update${total === 1 ? "" : "s"}…`)
         )
         leftover = r.remaining
-      } catch {
+        reason = r.reason
+      } catch (err) {
         leftover = -1
+        reason = err instanceof Error ? err.message : null
       }
       await adoptUnlockedKey(member.id, key, res.keyId)
       uk.current = null
       wraps.current = []
       setStage("done")
       if (leftover === 0) toast.success("Your updates are now protected.")
-      else toast.error("Protection is set up, but some past updates couldn't be protected yet. Open Me → Security to retry.")
+      else toast.error(`Protection is set up, but some past updates couldn't be protected yet${reason ? `: ${reason}` : "."} Open Me → Security to retry.`, { duration: 15000 })
       onDone?.()
       router.refresh()
     })

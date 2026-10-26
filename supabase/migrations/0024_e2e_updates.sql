@@ -44,6 +44,13 @@ create table if not exists member_key_wraps (
   last_used_at timestamptz
 );
 alter table member_key_wraps add column if not exists key_id uuid not null default gen_random_uuid();
+-- Re-run over an earlier copy of this migration (no key_id yet): the column
+-- default gave every existing wrap its own random id; give each member's
+-- wraps ONE shared id again, as a fresh setup would.
+update member_key_wraps w
+set key_id = k.key_id
+from (select member_id, min(key_id::text)::uuid as key_id from member_key_wraps group by member_id) k
+where w.member_id = k.member_id and w.key_id <> k.key_id;
 create index if not exists member_key_wraps_member_idx on member_key_wraps(member_id);
 create unique index if not exists member_key_wraps_credential_unique
   on member_key_wraps(credential_id) where credential_id is not null;

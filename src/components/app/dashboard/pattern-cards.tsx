@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cardAad, decryptJson, encryptJson, updateAad } from "@/lib/crypto/content"
 import { dismissPatternCard, savePatternCards } from "@/lib/ai/pattern-cards-actions"
-import { updateContentSchema, type UpdateContent } from "@/lib/updates/schema"
+import { parseStoredUpdate, type UpdateContent } from "@/lib/updates/schema"
 
 type CardRow = { id: string; payload_enc: string; source_update_count: number; generated_at: string }
 type RecentRow = { meetingId: string; envelope: string | null; legacy: unknown | null; completedAt: string | null }
@@ -42,8 +42,7 @@ export function PatternCardsClient(props: {
 
 async function openUpdate(key: CryptoKey, memberId: string, row: RecentRow): Promise<UpdateContent | null> {
   const raw = row.envelope ? await decryptJson(key, row.envelope, updateAad(memberId, row.meetingId)) : row.legacy
-  const parsed = updateContentSchema.safeParse(raw)
-  return parsed.success ? parsed.data : null
+  return parseStoredUpdate(raw)
 }
 
 function Inner({ cryptoKey, keyId, member, finalizedCount, cards, recent, aiEnabled }: { cryptoKey: CryptoKey; keyId: string } & Parameters<typeof PatternCardsClient>[0]) {

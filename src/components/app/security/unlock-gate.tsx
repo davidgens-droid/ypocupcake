@@ -69,10 +69,19 @@ export function UnlockGate({ member, children, compact = false }: Props) {
     swept.current = snap.keyId
     const key = snap.key
     const keyId = snap.keyId
-    sweepLegacyUpdates(member.id, key, keyId).then((r) => {
-      if (r.total > 0 && r.remaining === 0) toast.success(`${r.total} past update${r.total === 1 ? "" : "s"} protected.`)
-      if (r.remaining > 0) toast.error(`${r.remaining} past update${r.remaining === 1 ? "" : "s"} couldn't be protected yet. Retry from Me → Security.`)
-    }).catch(() => {})
+    sweepLegacyUpdates(member.id, key, keyId)
+      .then((r) => {
+        if (r.total > 0 && r.remaining === 0) toast.success(`${r.total} past update${r.total === 1 ? "" : "s"} protected.`)
+        if (r.remaining > 0) {
+          toast.error(
+            `${r.remaining} past update${r.remaining === 1 ? "" : "s"} couldn't be protected yet${r.reason ? `: ${r.reason}` : "."} Retry from Me → Security.`,
+            { duration: 15000 }
+          )
+        }
+      })
+      .catch((err: unknown) => {
+        toast.error(`Couldn't check your past updates${err instanceof Error && err.message ? `: ${err.message}` : "."} Retry from Me → Security.`, { duration: 15000 })
+      })
   }, [unlocked, snap.key, snap.keyId, member.id])
 
   if (unlocked && snap.key && snap.keyId) return <>{children(snap.key, snap.keyId)}</>

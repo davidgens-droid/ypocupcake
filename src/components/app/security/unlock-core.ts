@@ -19,7 +19,7 @@ import { cacheUnlockedKey } from "@/lib/crypto/cache"
 import { setUnlockedKey } from "@/lib/crypto/session"
 import type { KeyWrap, WrapInput } from "@/lib/security/actions"
 import { getMyLegacyUpdates, migrateUpdates } from "@/lib/updates/actions"
-import { updateContentSchema } from "@/lib/updates/schema"
+import { parseStoredUpdate } from "@/lib/updates/schema"
 
 /**
  * The device-side half of unlocking and of making locked copies. Spec §4.
@@ -81,41 +81,56 @@ export async function adoptUnlockedKey(memberId: string, key: CryptoKey, keyId: 
   return usable
 }
 
+export type SweepResult = {
+  total: number
+  remaining: number
+  /** Why the first failure happened, in words fit for a toast; null when all went through. */
+  reason: string | null
+}
+
 /**
  * Encrypt any of the member's updates that are still stored readable (rows
  * never migrated, or a migration that was interrupted). Idempotent: the
  * server only touches rows without an envelope, so this is safe to run
- * after every unlock. Rows that don't fit the schema are left alone rather
- * than replaced. Returns how many remain unprotected.
+ * after every unlock. Older or partial rows are normalised into today's
+ * shape without dropping text; only something that isn't an update at all
+ * is left alone. Returns how many remain unprotected and why.
  */
 export async function sweepLegacyUpdates(
   memberId: string,
   key: CryptoKey,
   keyId: string,
   onProgress?: (done: number, total: number) => void
-): Promise<{ total: number; remaining: number }> {
+): Promise<SweepResult> {
   const legacy = await getMyLegacyUpdates()
-  if (legacy.length === 0) return { total: 0, remaining: 0 }
+  if (legacy.length === 0) return { total: 0, remaining: 0, reason: null }
   let remaining = legacy.length
+  let reason: string | null = null
   for (let i = 0; i < legacy.length; i += 10) {
     const rows = []
+    let unreadable = 0
     for (const row of legacy.slice(i, i + 10)) {
-      const parsed = updateContentSchema.safeParse(row.content)
-      if (!parsed.success) continue
+      const parsed = parseStoredUpdate(row.content)
+      if (!parsed) {
+        unreadable++
+        continue
+      }
       rows.push({
         meetingId: row.meetingId,
-        contentEnc: await encryptJson(key, parsed.data, updateAad(memberId, row.meetingId)),
-        qol: parsed.data.qol,
+        contentEnc: await encryptJson(key, parsed, updateAad(memberId, row.meetingId)),
+        qol: parsed.qol,
         keyId,
       })
     }
+    if (unreadable > 0) reason ??= `${unreadable} of them ${unreadable === 1 ? "isn't" : "aren't"} readable as an update.`
     if (rows.length > 0) {
       const res = await migrateUpdates(rows)
       if (res.ok) remaining -= rows.length
+      else reason ??= res.error
     }
     onProgress?.(Math.min(i + 10, legacy.length), legacy.length)
   }
-  return { total: legacy.length, remaining }
+  return { total: legacy.length, remaining, reason }
 }
 
 // ── making locked copies ─────────────────────────────────────────────────────
