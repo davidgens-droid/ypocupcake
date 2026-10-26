@@ -94,6 +94,13 @@ const LIMITS = {
 export async function generateUpdateFromBrainDump(input: {
   brainDump: string
   existing?: UpdateContent
+  /**
+   * The member's most recent finalized updates (newest first, at most 3),
+   * decrypted on their device. Updates are end-to-end encrypted, so the
+   * server can't read them itself; they are used for calibration only and
+   * never stored.
+   */
+  history?: UpdateContent[]
 }): Promise<BrainDumpResult> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI is not configured (missing ANTHROPIC_API_KEY)." }
@@ -123,20 +130,13 @@ export async function generateUpdateFromBrainDump(input: {
     refining = !isEmptyUpdate(parsed.data)
   }
 
-  // Pull the member's last 3 finalized updates to give the AI context (so
-  // recurring themes carry over and QoL ratings stay calibrated). RLS
-  // ensures we only ever see this member's own updates.
+  // The member's last finalized updates give the AI context (recurring
+  // themes carry over, QoL ratings stay calibrated). They arrive from the
+  // device, already decrypted there; anything malformed is simply dropped.
   const supabase = await createClient()
-  const { data: pastUpdates } = await supabase
-    .from("updates")
-    .select("content, completed_at")
-    .eq("member_id", me.id)
-    .not("completed_at", "is", null)
-    .order("completed_at", { ascending: false })
-    .limit(3)
-
-  const historyContext = (pastUpdates ?? [])
-    .map((u, i) => `## Past update ${i + 1}\n${JSON.stringify(u.content, null, 2)}`)
+  const history = z.array(updateContentSchema).max(3).safeParse(input.history ?? [])
+  const historyContext = (history.success ? history.data : [])
+    .map((u, i) => `## Past update ${i + 1}\n${JSON.stringify(u, null, 2)}`)
     .join("\n\n")
 
   const client = new Anthropic({

@@ -183,6 +183,12 @@ export async function interviewTurn(input: {
    * Omitted (or empty) for a fresh interview.
    */
   existing?: UpdateContent
+  /**
+   * The member's last two finalized updates (newest first), decrypted on
+   * their device — updates are end-to-end encrypted, so the server can't
+   * fetch them. Continuity context only; never stored.
+   */
+  history?: UpdateContent[]
 }): Promise<InterviewTurnResponse> {
   if (!process.env.ANTHROPIC_API_KEY) {
     return { ok: false, error: "AI is not configured (missing ANTHROPIC_API_KEY)." }
@@ -236,32 +242,18 @@ export async function interviewTurn(input: {
   }
 
   // Continuity context: the member's last two finalized updates, compacted.
+  // Supplied by the device (decrypted there); malformed input is dropped.
   const supabase = await createClient()
-  const { data: past } = await supabase
-    .from("updates")
-    .select("content, completed_at")
-    .eq("member_id", me.id)
-    .not("completed_at", "is", null)
-    .order("completed_at", { ascending: false })
-    .limit(2)
-
-  const continuity = (past ?? [])
-    .map((u) => {
-      const c = u.content as Record<string, unknown> | null
-      if (!c) return null
-      const sec = (k: string) => (c[k] as { situation?: string } | undefined)?.situation ?? ""
-      return {
-        date: u.completed_at?.slice(0, 10) ?? "",
-        qol: c.qol ?? null,
-        business: sec("business"),
-        family: sec("family"),
-        personal: sec("personal"),
-        vampire: (c.energy_vampire as string | undefined) ?? "",
-        goal: (c.goal as { text?: string } | undefined)?.text ?? "",
-        topic: (c.topic as { text?: string } | undefined)?.text ?? "",
-      }
-    })
-    .filter(Boolean)
+  const past = z.array(updateContentSchema).max(2).safeParse(input.history ?? [])
+  const continuity = (past.success ? past.data : []).map((c) => ({
+    qol: c.qol,
+    business: c.business.situation,
+    family: c.family.situation,
+    personal: c.personal.situation,
+    vampire: c.energy_vampire,
+    goal: c.goal.text,
+    topic: c.topic.text,
+  }))
 
   const firstName = me.name.split(" ")[0]
   const convo =

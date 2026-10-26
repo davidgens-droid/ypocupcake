@@ -32,7 +32,10 @@ as $$
      and exists (select 1 from platform_admins p where p.user_id = auth.uid())
 $$;
 
-create or replace function platform_forum_stats()
+-- Dropped first: a later migration (0024) widens the return type, and
+-- `create or replace` can't change a function's return type on a re-run.
+drop function if exists platform_forum_stats();
+create function platform_forum_stats()
 returns table (
   forum_id uuid,
   name text,

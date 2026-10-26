@@ -121,6 +121,8 @@ type Phase =
 
 type Props = {
   currentContent: UpdateContent
+  /** The member's recent finalized updates, decrypted on this device (newest first). */
+  history: UpdateContent[]
   /**
    * True when the member already has content: the interviewer starts from
    * the draft's gaps (or asks what to add) and the generator folds the
@@ -180,6 +182,7 @@ function unlockAudio(ctx: AudioContext) {
  */
 export function InterviewMode({
   currentContent,
+  history,
   refining,
   naturalVoice = false,
   onGenerated,
@@ -235,9 +238,9 @@ export function InterviewMode({
 
   // Latest props, readable from async continuations that may outlive the
   // render that started them (a server round-trip, a silence timer).
-  const latest = useRef({ currentContent, refining, onGenerated, onExit, onActiveChange })
+  const latest = useRef({ currentContent, history, refining, onGenerated, onExit, onActiveChange })
   useEffect(() => {
-    latest.current = { currentContent, refining, onGenerated, onExit, onActiveChange }
+    latest.current = { currentContent, history, refining, onGenerated, onExit, onActiveChange }
   })
 
   const answered = transcript.filter((m) => m.role === "user").length
@@ -575,6 +578,7 @@ export function InterviewMode({
       res = await generateUpdateFromBrainDump({
         brainDump,
         existing: latest.current.currentContent,
+        history: latest.current.history.slice(0, 3),
       })
     } catch {
       // The Server Action itself rejected (connection dropped, a deploy
@@ -608,6 +612,7 @@ export function InterviewMode({
       res = await interviewTurn({
         transcript: next,
         existing: latest.current.refining ? latest.current.currentContent : undefined,
+        history: latest.current.history.slice(0, 2),
       })
     } catch {
       if (superseded()) return

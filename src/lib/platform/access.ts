@@ -23,6 +23,8 @@ export type PlatformForumRow = {
   founder_email: string | null
   member_count: number
   admin_count: number
+  /** Active members who have completed the one-time update-protection setup. */
+  protected_count: number
   meeting_count: number
   next_meeting_at: string | null
   ai_calls_30d: number

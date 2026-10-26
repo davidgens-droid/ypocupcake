@@ -7,13 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:isolation": "node scripts/isolation-test.mjs"
+    "test:isolation": "node scripts/isolation-test.mjs",
+    "test:crypto": "node scripts/crypto-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
     "@base-ui/react": "^1.4.1",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-slot": "^1.2.4",
+    "@react-pdf/renderer": "^4.9.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.0",
     "class-variance-authority": "^0.7.1",

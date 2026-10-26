@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { encryptJson, updateAad } from "@/lib/crypto/content"
 import {
   emptyUpdateContent,
   updateContentSchema,
@@ -35,10 +36,17 @@ const TOTAL_STEPS = 16
 type Props = {
   meetingId: string
   meetingLabel: string
+  memberId: string
+  /** The member's unlocked update key (non-extractable). Every save encrypts with it. */
+  cryptoKey: CryptoKey
+  /** The key's id; sent with every save so a retired key is refused by the server. */
+  keyId: string
   initialContent: UpdateContent
   initialReady: boolean
   formats: ExplorationFormat[]
   qolHistory: Array<Record<string, number>>
+  /** Recent finalized updates, decrypted here (newest first), for AI calibration. */
+  history: UpdateContent[]
   /** Interview questions are voiced by a neural TTS service (vs. the browser). */
   naturalVoice?: boolean
 }
@@ -46,10 +54,14 @@ type Props = {
 export function UpdateBuilder({
   meetingId,
   meetingLabel,
+  memberId,
+  cryptoKey,
+  keyId,
   initialContent,
   initialReady,
   formats,
   qolHistory,
+  history,
   naturalVoice = false,
 }: Props) {
   const router = useRouter()
@@ -59,6 +71,14 @@ export function UpdateBuilder({
   const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [pending, startTransition] = useTransition()
 
+  // Encrypt on this device, then hand the server an opaque envelope plus the
+  // four QoL scores (the one part that is legitimately shared).
+  async function persistDraft(c: UpdateContent) {
+    const parsed = updateContentSchema.parse(c)
+    const contentEnc = await encryptJson(cryptoKey, parsed, updateAad(memberId, meetingId))
+    return saveUpdateDraft({ meetingId, contentEnc, qol: parsed.qol, keyId })
+  }
+
   // Auto-save on step change (skip the very first render).
   const prev = useRef(step)
   useEffect(() => {
@@ -66,15 +86,18 @@ export function UpdateBuilder({
     prev.current = step
     startTransition(async () => {
       try {
-        const parsed = updateContentSchema.parse(content)
-        await saveUpdateDraft({ meetingId, content: parsed })
+        const res = await persistDraft(content)
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
         setSavedAt(new Date())
       } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "Couldn't save draft."
-        )
+        toast.error(err instanceof Error ? err.message : "Couldn't save draft.")
       }
     })
+    // persistDraft is stable per key/meeting; content is the real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, content, meetingId])
 
   const setBusiness = (k: keyof UpdateContent["business"], v: unknown) =>
@@ -87,16 +110,39 @@ export function UpdateBuilder({
   const onFinalize = () => {
     startTransition(async () => {
       try {
-        await finalizeUpdate({ meetingId, content, ready })
-        toast.success(
-          ready ? "Update finalized — you're Ready." : "Update saved."
-        )
+        const parsed = updateContentSchema.parse(content)
+        const contentEnc = await encryptJson(cryptoKey, parsed, updateAad(memberId, meetingId))
+        const res = await finalizeUpdate({
+          meetingId,
+          contentEnc,
+          qol: parsed.qol,
+          keyId,
+          ready,
+          // Shared by the member's choice — sent in the clear only when opted in.
+          publishTopic:
+            parsed.topic.publish_to_parking_lot && parsed.topic.text.trim()
+              ? {
+                  text: parsed.topic.text.trim(),
+                  context: parsed.topic.context,
+                  urgency: parsed.topic.urgency,
+                  tool_category: parsed.topic.tool_category,
+                  exploration_format: parsed.topic.exploration_format,
+                }
+              : null,
+          commitment:
+            parsed.goal.make_commitment && parsed.goal.text.trim()
+              ? { text: parsed.goal.text.trim(), horizon: parsed.goal.horizon }
+              : null,
+        })
+        if (!res.ok) {
+          toast.error(res.error)
+          return
+        }
+        toast.success(ready ? "Update finalized — you're Ready." : "Update saved.")
         router.push("/dashboard")
         router.refresh()
       } catch (err) {
-        toast.error(
-          err instanceof Error ? err.message : "Couldn't finalize update."
-        )
+        toast.error(err instanceof Error ? err.message : "Couldn't finalize update.")
       }
     })
   }
@@ -105,11 +151,7 @@ export function UpdateBuilder({
     <div className="mx-auto flex w-full max-w-xl flex-col">
       {/* Top bar */}
       <div className="mb-4 flex items-center justify-between gap-2 text-sm">
-        <Button
-          size="sm"
-          variant="ghost"
-          render={<Link href="/dashboard" />}
-        >
+        <Button size="sm" variant="ghost" render={<Link href="/dashboard" />}>
           <ChevronLeft className="size-4" /> Dashboard
         </Button>
         <div className="ml-auto flex items-center gap-2">
@@ -121,11 +163,7 @@ export function UpdateBuilder({
                 : "Draft"}
           </span>
           {step !== TOTAL_STEPS && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setStep(TOTAL_STEPS)}
-            >
+            <Button size="sm" variant="outline" onClick={() => setStep(TOTAL_STEPS)}>
               <ListChecks className="size-4" /> Review
             </Button>
           )}
@@ -140,11 +178,7 @@ export function UpdateBuilder({
             onClick={() => setStep(n)}
             className={cn(
               "size-2 rounded-full transition-colors",
-              n < step
-                ? "bg-foreground"
-                : n === step
-                  ? "bg-foreground ring-2 ring-foreground/20"
-                  : "bg-muted-foreground/25"
+              n < step ? "bg-foreground" : n === step ? "bg-foreground ring-2 ring-foreground/20" : "bg-muted-foreground/25"
             )}
             aria-label={`Go to step ${n}`}
           />
@@ -159,106 +193,27 @@ export function UpdateBuilder({
         {step === 1 && <StepIntro />}
 
         {step === 2 && (
-          <StepQoL
-            value={content.qol}
-            history={qolHistory}
-            onChange={(qol) => setContent((c) => ({ ...c, qol }))}
-          />
+          <StepQoL value={content.qol} history={qolHistory} onChange={(qol) => setContent((c) => ({ ...c, qol }))} />
         )}
 
-        {step === 3 && (
-          <StepFeelings
-            section="Business"
-            value={content.business.feelings}
-            onChange={(v) => setBusiness("feelings", v)}
-          />
-        )}
-        {step === 4 && (
-          <StepSituation
-            section="Business"
-            value={content.business.situation}
-            onChange={(v) => setBusiness("situation", v)}
-          />
-        )}
-        {step === 5 && (
-          <StepSignificance
-            section="Business"
-            value={content.business.significance}
-            onChange={(v) => setBusiness("significance", v)}
-          />
-        )}
+        {step === 3 && <StepFeelings section="Business" value={content.business.feelings} onChange={(v) => setBusiness("feelings", v)} />}
+        {step === 4 && <StepSituation section="Business" value={content.business.situation} onChange={(v) => setBusiness("situation", v)} />}
+        {step === 5 && <StepSignificance section="Business" value={content.business.significance} onChange={(v) => setBusiness("significance", v)} />}
 
-        {step === 6 && (
-          <StepFeelings
-            section="Family"
-            value={content.family.feelings}
-            onChange={(v) => setFamily("feelings", v)}
-          />
-        )}
-        {step === 7 && (
-          <StepSituation
-            section="Family"
-            value={content.family.situation}
-            onChange={(v) => setFamily("situation", v)}
-          />
-        )}
-        {step === 8 && (
-          <StepSignificance
-            section="Family"
-            value={content.family.significance}
-            onChange={(v) => setFamily("significance", v)}
-          />
-        )}
+        {step === 6 && <StepFeelings section="Family" value={content.family.feelings} onChange={(v) => setFamily("feelings", v)} />}
+        {step === 7 && <StepSituation section="Family" value={content.family.situation} onChange={(v) => setFamily("situation", v)} />}
+        {step === 8 && <StepSignificance section="Family" value={content.family.significance} onChange={(v) => setFamily("significance", v)} />}
 
-        {step === 9 && (
-          <StepFeelings
-            section="Personal"
-            value={content.personal.feelings}
-            onChange={(v) => setPersonal("feelings", v)}
-          />
-        )}
-        {step === 10 && (
-          <StepSituation
-            section="Personal"
-            value={content.personal.situation}
-            onChange={(v) => setPersonal("situation", v)}
-          />
-        )}
-        {step === 11 && (
-          <StepSignificance
-            section="Personal"
-            value={content.personal.significance}
-            onChange={(v) => setPersonal("significance", v)}
-          />
-        )}
+        {step === 9 && <StepFeelings section="Personal" value={content.personal.feelings} onChange={(v) => setPersonal("feelings", v)} />}
+        {step === 10 && <StepSituation section="Personal" value={content.personal.situation} onChange={(v) => setPersonal("situation", v)} />}
+        {step === 11 && <StepSignificance section="Personal" value={content.personal.significance} onChange={(v) => setPersonal("significance", v)} />}
 
-        {step === 12 && (
-          <StepComingUp
-            value={content.coming_up}
-            onChange={(coming_up) => setContent((c) => ({ ...c, coming_up }))}
-          />
-        )}
+        {step === 12 && <StepComingUp value={content.coming_up} onChange={(coming_up) => setContent((c) => ({ ...c, coming_up }))} />}
         {step === 13 && (
-          <StepVampire
-            value={content.energy_vampire}
-            onChange={(energy_vampire) =>
-              setContent((c) => ({ ...c, energy_vampire }))
-            }
-          />
+          <StepVampire value={content.energy_vampire} onChange={(energy_vampire) => setContent((c) => ({ ...c, energy_vampire }))} />
         )}
-        {step === 14 && (
-          <StepGoal
-            value={content.goal}
-            onChange={(goal) => setContent((c) => ({ ...c, goal }))}
-          />
-        )}
-        {step === 15 && (
-          <StepTopic
-            value={content.topic}
-            onChange={(topic) => setContent((c) => ({ ...c, topic }))}
-            formats={formats}
-          />
-        )}
+        {step === 14 && <StepGoal value={content.goal} onChange={(goal) => setContent((c) => ({ ...c, goal }))} />}
+        {step === 15 && <StepTopic value={content.topic} onChange={(topic) => setContent((c) => ({ ...c, topic }))} formats={formats} />}
         {step === 16 && (
           <StepReview
             content={content}
@@ -270,17 +225,16 @@ export function UpdateBuilder({
               setReady(false)
               startTransition(async () => {
                 try {
-                  await saveUpdateDraft({
-                    meetingId,
-                    content: emptyUpdateContent,
-                  })
+                  const res = await persistDraft(emptyUpdateContent)
+                  if (!res.ok) {
+                    toast.error(res.error)
+                    return
+                  }
                   setSavedAt(new Date())
                   toast.success("Update cleared.")
                   setStep(1)
                 } catch (err) {
-                  toast.error(
-                    err instanceof Error ? err.message : "Couldn't clear update."
-                  )
+                  toast.error(err instanceof Error ? err.message : "Couldn't clear update.")
                 }
               })
             }}
@@ -293,6 +247,7 @@ export function UpdateBuilder({
       {/* AI brain-dump (floating) */}
       <BrainDumpDialog
         currentContent={content}
+        history={history}
         naturalVoice={naturalVoice}
         onContentReady={(c) => {
           setContent(c)
@@ -301,21 +256,16 @@ export function UpdateBuilder({
           // and the explicit save below is the single source of truth.
           prev.current = TOTAL_STEPS
           setStep(TOTAL_STEPS)
-          // Persist explicitly. The auto-save effect only fires on a step
-          // CHANGE, so a brain-dump applied while already on the review step
-          // (the normal refine loop) would otherwise live only in memory and
-          // be lost on navigation.
           startTransition(async () => {
             try {
-              await saveUpdateDraft({
-                meetingId,
-                content: updateContentSchema.parse(c),
-              })
+              const res = await persistDraft(c)
+              if (!res.ok) {
+                toast.error(res.error)
+                return
+              }
               setSavedAt(new Date())
             } catch (err) {
-              toast.error(
-                err instanceof Error ? err.message : "Couldn't save draft."
-              )
+              toast.error(err instanceof Error ? err.message : "Couldn't save draft.")
             }
           })
         }}
@@ -323,19 +273,11 @@ export function UpdateBuilder({
 
       {/* Bottom nav */}
       <div className="sticky bottom-16 flex items-center justify-between border-t bg-background py-3 md:bottom-0">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setStep((s) => Math.max(1, s - 1))}
-          disabled={step === 1}
-        >
+        <Button variant="ghost" size="sm" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1}>
           <ChevronLeft className="size-4" /> Back
         </Button>
         {step < TOTAL_STEPS ? (
-          <Button
-            size="sm"
-            onClick={() => setStep((s) => Math.min(TOTAL_STEPS, s + 1))}
-          >
+          <Button size="sm" onClick={() => setStep((s) => Math.min(TOTAL_STEPS, s + 1))}>
             Next
           </Button>
         ) : (

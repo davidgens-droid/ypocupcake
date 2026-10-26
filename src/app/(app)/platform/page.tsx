@@ -91,6 +91,9 @@ export default async function PlatformPage() {
                   <td className="px-3 py-2 text-right tabular-nums">
                     {f.member_count}
                     <span className="text-xs text-muted-foreground"> ({f.admin_count} admin{f.admin_count === 1 ? "" : "s"})</span>
+                    <p className="text-xs text-muted-foreground" title="Members who have set up end-to-end protection for their updates">
+                      {f.protected_count} of {f.member_count} protected
+                    </p>
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{f.meeting_count}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{date(f.next_meeting_at, "MMM d, yyyy · h:mm a")}</td>

@@ -187,9 +187,11 @@ async function fixtures() {
       forum_id: f.id, submitter_member_id: memberUser.id, added_by_member_id: memberUser.id,
       topic: `Topic ${key}`, tool_category: "EQ", exploration_format: "fsfe",
     }).select("id").single(), "parking-lot item")
+    // A legacy (not yet migrated) row: readable content plus the QoL columns 0024 backfills.
     must(await admin.from("updates").insert({
       member_id: memberUser.id, meeting_id: meeting.id, ready: true, completed_at: new Date().toISOString(),
       content: { qol: { physical_health: 7, mental_health: 6, financial_health: 8, friends_community: 5 }, secret: `SECRET-${key}` },
+      qol_physical: 7, qol_mental: 6, qol_financial: 8, qol_friends: 5,
     }), "update")
     must(await admin.from("commitments").insert({ forum_id: f.id, member_id: memberUser.id, text: `Commit ${key}` }), "commitment")
     const album = must(await admin.from("photo_albums").insert({ forum_id: f.id, name: `Album ${key}`, created_by: memberUser.id }).select("id").single(), "album")
@@ -366,7 +368,7 @@ async function assertions(F) {
   ok("12.7 replica identity is DEFAULT on all published tables", ri.rows.length === 4 && ri.rows.every((r) => r.relreplident === "d"), JSON.stringify(ri.rows))
 
   // §12.8 — member-private tables: self-only, even for admin/moderator; exact policy set
-  for (const t of ["updates", "ai_interactions", "ai_pattern_cards", "notifications"]) {
+  for (const t of ["updates", "ai_interactions", "ai_pattern_cards", "notifications", "member_key_wraps"]) {
     const res = await A.admin.client.from(t).select("*")
     const others = (res.data ?? []).filter((r) => r.member_id !== A.admin.id)
     ok(`12.8 ${t}: forum admin+moderator sees no other member's rows`, !res.error && others.length === 0, res.error?.message)
@@ -379,7 +381,8 @@ async function assertions(F) {
 
   // §12.9 — QoL history is forum-scoped and role-gated
   const q1 = await A.admin.client.rpc("forum_qol_history")
-  ok("12.9 moderator sees only same-forum QoL rows", !q1.error && (q1.data ?? []).every((r) => [A.member.id, A.admin.id].includes(r.member_id)), q1.error?.message)
+  ok("12.9 moderator sees only same-forum QoL rows", !q1.error && (q1.data ?? []).length > 0 && (q1.data ?? []).every((r) => [A.member.id, A.admin.id].includes(r.member_id)), q1.error?.message ?? JSON.stringify(q1.data))
+  ok("12.9 QoL scores come from the score columns (7/6/8/5)", (q1.data ?? []).some((r) => r.member_id === A.member.id && r.physical === 7 && r.mental === 6 && r.financial === 8 && r.friends === 5), JSON.stringify(q1.data))
   const q2 = await A.member.client.rpc("forum_qol_history")
   ok("12.9 plain member cannot call forum_qol_history", isRejected(q2))
   ok("12.9 QoL rows never contain update content", (q1.data ?? []).every((r) => !("content" in r) && !("secret" in r)))
@@ -433,6 +436,71 @@ async function assertions(F) {
   ok("12.15 ...and for the other forum too", !ai2.error && ai2.data === 1, JSON.stringify(ai2.data ?? ai2.error))
   const ai3 = await anon.rpc("forum_ai_calls_today")
   ok("12.15 anonymous caller cannot call forum_ai_calls_today", isRejected(ai3))
+
+  // §12.16 — end-to-end encrypted updates: the server stores only envelopes; keys are owner-only
+  const b64u = (n) => Buffer.from(randomBytes(n)).toString("base64url")
+  const envelope = () => `v1.${b64u(12)}.${b64u(48)}`
+  const wrapsFor = () => [
+    { kind: "passphrase", kdf_salt: b64u(16), kdf_iterations: 600000, wrapped_key: b64u(40) },
+    { kind: "recovery", kdf_salt: b64u(32), wrapped_key: b64u(40) },
+  ]
+  const k1 = await A.member.client.rpc("setup_member_keys", { p_wraps: [{ kind: "passphrase", kdf_salt: b64u(16), kdf_iterations: 600000, wrapped_key: b64u(40) }] })
+  ok("12.16 setup_member_keys refuses a key set without a recovery code", codeIs(k1, "invalid_wraps"), k1.error?.message)
+  const k2 = await A.member.client.rpc("setup_member_keys", { p_wraps: [{ kind: "passphrase", kdf_salt: b64u(16), kdf_iterations: 1000, wrapped_key: b64u(40) }, { kind: "recovery", kdf_salt: b64u(32), wrapped_key: b64u(40) }] })
+  ok("12.16 setup_member_keys refuses a weak passphrase KDF", codeIs(k2, "invalid_wraps"), k2.error?.message)
+  const k3 = await A.member.client.rpc("setup_member_keys", { p_wraps: wrapsFor() })
+  ok("12.16 (control) a member sets up their key copies", !k3.error, k3.error?.message)
+  const k3ids = await admin.from("member_key_wraps").select("key_id").eq("member_id", A.member.id)
+  ok("12.16 setup returns the key id and every wrap carries it", /^[0-9a-f-]{36}$/.test(String(k3.data)) && (k3ids.data ?? []).length === 2 && k3ids.data.every((r) => r.key_id === k3.data), JSON.stringify([k3.data, k3ids.data]))
+  const k4 = await A.member.client.rpc("setup_member_keys", { p_wraps: wrapsFor() })
+  ok("12.16 setup_member_keys refuses a second setup", codeIs(k4, "already_set_up"), k4.error?.message)
+  const k5 = await A.admin.client.from("member_key_wraps").select("wrapped_key").eq("member_id", A.member.id)
+  ok("12.16 a forum admin cannot read a member's key copies", (k5.data ?? []).length === 0)
+  const k6 = await B.admin.client.from("member_key_wraps").select("wrapped_key")
+  ok("12.16 another forum sees no key copies at all", (k6.data ?? []).length === 0)
+  const k7 = await A.member.client.from("member_key_wraps").insert({ member_id: A.admin.id, kind: "recovery", kdf_salt: b64u(32), wrapped_key: b64u(40) })
+  ok("12.16 a member cannot plant a key copy on another member", isRejected(k7))
+  const k8 = await A.member.client.rpc("replace_member_key_wrap", { p_wrap: { kind: "recovery", kdf_salt: b64u(32), wrapped_key: b64u(40) } })
+  const k8count = await admin.from("member_key_wraps").select("id, key_id").eq("member_id", A.member.id).eq("kind", "recovery")
+  ok("12.16 (control) replacing the recovery code keeps exactly one, on the same key id", !k8.error && (k8count.data ?? []).length === 1 && k8count.data[0].key_id === k3.data, k8.error?.message)
+  // Encrypted saves: envelope + QoL columns, never readable content.
+  const env1 = envelope()
+  const xe1 = await A.member.client.from("updates").upsert({ member_id: A.member.id, meeting_id: A.meeting, content_enc: env1, content: null, qol_physical: 9, qol_mental: 6, qol_financial: 8, qol_friends: 5 }, { onConflict: "member_id,meeting_id" })
+  ok("12.16 (control) a member saves an encrypted update over their legacy row", !xe1.error, xe1.error?.message)
+  const xe1row = await admin.from("updates").select("content, content_enc, qol_physical").eq("member_id", A.member.id).eq("meeting_id", A.meeting).single()
+  ok("12.16 the service role sees only the envelope (no readable content)", xe1row.data?.content === null && xe1row.data?.content_enc === env1 && xe1row.data?.qol_physical === 9, JSON.stringify(xe1row.data))
+  const xe2 = await A.member.client.from("updates").update({ content: { leak: true } }).eq("member_id", A.member.id).eq("meeting_id", A.meeting)
+  const xe2row = await admin.from("updates").select("content").eq("member_id", A.member.id).eq("meeting_id", A.meeting).single()
+  ok("12.16 readable content can't be added next to an envelope (constraint)", isRejected(xe2) && xe2row.data?.content === null, xe2.error?.message)
+  const xe3 = await A.member.client.from("updates").update({ qol_physical: 11 }).eq("member_id", A.member.id).eq("meeting_id", A.meeting)
+  ok("12.16 QoL scores are range-checked", isRejected(xe3), xe3.error?.message)
+  const xq3 = await A.admin.client.rpc("forum_qol_history")
+  ok("12.16 QoL History reads the new score (9) from the columns", (xq3.data ?? []).some((r) => r.member_id === A.member.id && r.physical === 9), JSON.stringify(xq3.data))
+  const xc1 = await A.member.client.from("ai_pattern_cards").insert({ id: randomUUID(), member_id: A.member.id, payload_enc: envelope(), source_update_count: 1 })
+  ok("12.16 (control) a member stores an encrypted pattern card", !xc1.error, xc1.error?.message)
+  const xc2 = await A.member.client.from("ai_pattern_cards").insert({ id: randomUUID(), member_id: A.member.id, payload_enc: envelope(), title: "leak", detail: "leak", source_update_count: 1 })
+  ok("12.16 a pattern card can't hold readable text next to an envelope (constraint)", isRejected(xc2), xc2.error?.message)
+  // Start fresh (B's member): the content of their updates and their keys go; the rows, their QoL
+  // scores and everyone else's data stay.
+  must(await B.member.client.rpc("setup_member_keys", { p_wraps: wrapsFor() }), "B member keys")
+  const xr1 = await B.member.client.rpc("reset_member_encrypted_data")
+  const xr1u = await admin.from("updates").select("id, content, content_enc, ready, qol_physical").eq("member_id", B.member.id)
+  const xr1w = await admin.from("member_key_wraps").select("id").eq("member_id", B.member.id)
+  const xr1a = await admin.from("updates").select("id, content").eq("member_id", A.member.id)
+  ok(
+    "12.16 reset_member_encrypted_data blanks exactly the caller's update content and removes their keys (QoL kept)",
+    !xr1.error &&
+      (xr1u.data ?? []).length === 1 &&
+      xr1u.data.every((r) => r.content === null && r.content_enc === null && r.ready === false && r.qol_physical === 7) &&
+      (xr1w.data ?? []).length === 0 &&
+      (xr1a.data ?? []).length === 1,
+    xr1.error?.message ?? JSON.stringify(xr1u.data)
+  )
+  // Nothing on the server may import the device-side crypto.
+  const serverFiles = walk(path.join(ROOT, "src")).filter((f) => /\.(ts|tsx)$/.test(f) && !f.includes(`${path.sep}lib${path.sep}crypto${path.sep}`))
+    .filter((f) => { const src = fs.readFileSync(f, "utf8"); return !/^\s*["']use client["']/m.test(src.slice(0, 200)) && !f.includes(`${path.sep}components${path.sep}`) })
+  const cryptoImporters = serverFiles.filter((f) => /from ["']@\/lib\/crypto\//.test(fs.readFileSync(f, "utf8")))
+  ok("12.16 no server-side file imports @/lib/crypto", cryptoImporters.length === 0, cryptoImporters.map((f) => path.relative(ROOT, f)).join(", "))
 
   // §12.10 — onboarding: one forum per account; links expire/revoke/exhaust; peek reveals only the name
   const aName = (await admin.from("forums").select("name").eq("id", A.id).single()).data?.name
@@ -537,9 +605,12 @@ async function assertions(F) {
   const ownCheck = await admin.from("forums").select("status").eq("id", A.id).single()
   ok("12.11 an operator cannot pause their own forum (self-lockout guard)", codeIs(own, "own_forum") && ownCheck.data?.status === "active", own.error?.message)
   const stats = await A.admin.client.rpc("platform_forum_stats")
-  const cols = "admin_count,ai_calls_30d,created_at,forum_id,founder_email,founder_name,last_activity,meeting_count,member_count,name,next_meeting_at,status,timezone"
+  const cols = "admin_count,ai_calls_30d,created_at,forum_id,founder_email,founder_name,last_activity,meeting_count,member_count,name,next_meeting_at,protected_count,status,timezone"
   ok("12.11 platform_forum_stats lists every forum", !stats.error && (stats.data ?? []).length >= 3 && [A.id, B.id].every((id) => stats.data.some((r) => r.forum_id === id)), stats.error?.message)
   ok("12.11 platform_forum_stats returns exactly the operator-level columns (no member content)", (stats.data ?? []).every((r) => Object.keys(r).sort().join() === cols), JSON.stringify(Object.keys(stats.data?.[0] ?? {})))
+  const rowA = (stats.data ?? []).find((r) => r.forum_id === A.id)
+  // A.member set up protection in §12.16; A.admin and the §12.10 joiner did not.
+  ok("12.11 protected_count counts members who set up update protection (A: 1 of 3)", rowA?.protected_count === 1 && rowA?.member_count === 3, JSON.stringify(rowA))
   const rowB = (stats.data ?? []).find((r) => r.forum_id === B.id)
   ok("12.11 the numbers are right for forum B (2 active members, 1 admin, 1 meeting, founder = B Admin)", rowB?.member_count === 2 && rowB?.admin_count === 1 && rowB?.meeting_count === 1 && rowB?.founder_name === "B Admin" && rowB?.founder_email === B.admin.email, JSON.stringify(rowB))
   // A forum whose founder account is gone and whose only remaining member is

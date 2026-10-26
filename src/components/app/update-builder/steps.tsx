@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { ChevronDown, Pencil, Trash2, X } from "lucide-react"
-import { toast } from "sonner"
 
+import { UpdateExportButtons } from "@/components/app/update-pdf/export-buttons"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -14,7 +14,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { emailUpdateToSelf } from "@/lib/email/update-email"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -890,7 +889,7 @@ export function StepReview({
         </div>
       </div>
 
-      <ExportRow meetingId={meetingId} />
+      <UpdateExportButtons meetingId={meetingId} content={content} />
 
       <ClearAllRow onConfirm={onClearAll} />
     </div>
@@ -1139,63 +1138,6 @@ function TopicDetail({
           </p>
         </>
       )}
-    </div>
-  )
-}
-
-function ExportRow({ meetingId }: { meetingId: string }) {
-  const [pending, startTransition] = useTransition()
-
-  function onEmail() {
-    startTransition(async () => {
-      const result = await emailUpdateToSelf({ meetingId })
-      if (result.ok) {
-        toast.success("Sent. Check your inbox.")
-      } else {
-        toast.error(result.error)
-      }
-    })
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        onClick={() => window.open(`/print/update/${meetingId}`, "_blank")}
-      >
-        Download PDF
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        type="button"
-        onClick={onEmail}
-        disabled={pending}
-      >
-        {pending ? "Sending…" : "Email to me"}
-      </Button>
-    </div>
-  )
-}
-
-// Used only by the wizard for export download
-export function ExportButtons({
-  onDownload,
-  onEmail,
-}: {
-  onDownload?: () => void
-  onEmail?: () => void
-}) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" disabled onClick={onEmail}>
-        Email to me
-      </Button>
-      <Button variant="outline" size="sm" disabled onClick={onDownload}>
-        Download PDF
-      </Button>
     </div>
   )
 }

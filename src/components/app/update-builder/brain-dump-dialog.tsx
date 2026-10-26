@@ -27,6 +27,8 @@ import { InterviewMode } from "./interview-mode"
 type Props = {
   /** The update as it currently stands in the builder. Decides CREATE vs REFINE. */
   currentContent: UpdateContent
+  /** Recent finalized updates, decrypted on this device (newest first); AI calibration only. */
+  history: UpdateContent[]
   onContentReady: (content: UpdateContent) => void
   /** Interview questions are voiced by a neural TTS service (vs. the browser). */
   naturalVoice?: boolean
@@ -81,6 +83,7 @@ const hasSpeechRecognitionOnServer = () => false
 
 export function BrainDumpDialog({
   currentContent,
+  history,
   onContentReady,
   naturalVoice = false,
 }: Props) {
@@ -215,6 +218,7 @@ export function BrainDumpDialog({
       const result = await generateUpdateFromBrainDump({
         brainDump: payload,
         existing: check.data,
+        history: history.slice(0, 3),
       })
       // Superseded by a newer request — ignore this result entirely.
       if (myRequest !== requestId.current) return
@@ -300,6 +304,7 @@ export function BrainDumpDialog({
           {mode === "interview" ? (
             <InterviewMode
               currentContent={currentContent}
+              history={history}
               refining={refining}
               naturalVoice={naturalVoice}
               onGenerated={(c) => {

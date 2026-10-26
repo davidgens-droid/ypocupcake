@@ -14,14 +14,13 @@ import {
   PlusCircle,
 } from "lucide-react"
 
-import { Suspense } from "react"
-
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { PatternCards } from "@/components/app/dashboard/pattern-cards"
+import { PatternCardsClient } from "@/components/app/dashboard/pattern-cards"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { getMyRoles, hasAny } from "@/lib/auth/roles"
+import { hasEncryptionSetup } from "@/lib/security/status"
 import { createClient } from "@/lib/supabase/server"
 
 // Pattern cards are generated inside this page's render (behind Suspense) the
@@ -69,6 +68,10 @@ export default async function DashboardPage() {
     roles,
     { count: activeMembers },
     { data: forumRow },
+    { count: finalizedCount },
+    { data: cardRows },
+    { data: recentRows },
+    protectionSetUp,
   ] = await Promise.all([
     supabase
       .from("meetings")
@@ -95,6 +98,29 @@ export default async function DashboardPage() {
       .eq("forum_id", me.forum_id)
       .eq("status", "active"),
     supabase.from("forums").select("settings").eq("id", me.forum_id).maybeSingle(),
+    // Pattern cards are generated and read on the device (updates are
+    // end-to-end encrypted); the server only hands over the encrypted rows.
+    supabase
+      .from("updates")
+      .select("id", { count: "exact", head: true })
+      .eq("member_id", me.id)
+      .not("completed_at", "is", null),
+    supabase
+      .from("ai_pattern_cards")
+      .select("id, payload_enc, source_update_count, generated_at")
+      .eq("member_id", me.id)
+      .is("dismissed_at", null)
+      .not("payload_enc", "is", null)
+      .order("generated_at", { ascending: false })
+      .limit(3),
+    supabase
+      .from("updates")
+      .select("meeting_id, content_enc, content, completed_at")
+      .eq("member_id", me.id)
+      .not("completed_at", "is", null)
+      .order("completed_at", { ascending: false })
+      .limit(6),
+    hasEncryptionSetup(me.id),
   ])
 
   const charterWritten =
@@ -261,10 +287,40 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* AI pattern cards (renders nothing until member has 3+ updates) */}
-      <Suspense fallback={null}>
-        <PatternCards />
-      </Suspense>
+      {/* Protection nudge for members who haven't done the one-time setup */}
+      {!protectionSetUp && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="text-base">Protect your updates</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+              Updates are now encrypted on your own device, so only you can
+              read them. One-time setup takes a minute: Face ID or a
+              passphrase, plus a recovery code to keep safe.
+            </p>
+            <Button size="sm" render={<Link href="/me/security" />}>
+              Set up now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AI pattern cards: decrypted / generated on the device (nothing until 3+ updates) */}
+      {protectionSetUp && (
+        <PatternCardsClient
+          member={{ id: me.id, email: me.email, name: me.name, forumName: me.forum.name }}
+          finalizedCount={finalizedCount ?? 0}
+          cards={(cardRows ?? []) as { id: string; payload_enc: string; source_update_count: number; generated_at: string }[]}
+          recent={(recentRows ?? []).map((r) => ({
+            meetingId: r.meeting_id as string,
+            envelope: (r.content_enc as string | null) ?? null,
+            legacy: r.content ?? null,
+            completedAt: (r.completed_at as string | null) ?? null,
+          }))}
+          aiEnabled={!!process.env.ANTHROPIC_API_KEY}
+        />
+      )}
 
       {/* Open commitments */}
       <section className="space-y-2">

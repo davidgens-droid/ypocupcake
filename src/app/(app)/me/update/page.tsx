@@ -3,23 +3,38 @@ import { formatMeeting, meetingPastCutoffISO } from "@/lib/dates"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { UpdateBuilder } from "@/components/app/update-builder/update-builder"
+import { UpdateBuilderGate, type EncryptedUpdateRow } from "@/components/app/update-builder/update-builder-gate"
 import { requireCurrentMember } from "@/lib/auth/current-member"
 import { createClient } from "@/lib/supabase/server"
-import {
-  emptyUpdateContent,
-  updateContentSchema,
-  type UpdateContent,
-} from "@/lib/updates/schema"
 import type { ExplorationFormat } from "@/lib/types/domain"
 
 // The AI brain-dump (a Server Action invoked from this page) calls Claude
-// (Fable 5.1) with adaptive thinking, which can take 20–60s on a long dump. Without this, the
-// action runs under Vercel's short default function timeout and gets killed
-// mid-call — the cause of the intermittent failures. Server Actions inherit
-// maxDuration from the page they're invoked on. 120s (Vercel Pro allows up to
-// 300) gives generous headroom; you're only billed for real execution time.
+// with adaptive thinking, which can take 20–60s on a long dump. Server
+// Actions inherit maxDuration from the page they're invoked on.
 export const maxDuration = 120
+
+type Row = {
+  meeting_id: string
+  content_enc: string | null
+  content: unknown | null
+  ready?: boolean
+  completed_at?: string | null
+  qol_physical: number | null
+  qol_mental: number | null
+  qol_financial: number | null
+  qol_friends: number | null
+}
+
+const toRow = (r: Row): EncryptedUpdateRow => ({ meetingId: r.meeting_id, envelope: r.content_enc, legacy: r.content })
+
+/** QoL scores from the columns; a not-yet-migrated row still has them inside its readable content. */
+function qolOf(r: Row): Record<string, number> | null {
+  if (r.qol_physical != null && r.qol_mental != null && r.qol_financial != null && r.qol_friends != null) {
+    return { physical_health: r.qol_physical, mental_health: r.qol_mental, financial_health: r.qol_financial, friends_community: r.qol_friends }
+  }
+  const legacy = (r.content as { qol?: Record<string, number> } | null)?.qol
+  return legacy ?? null
+}
 
 export default async function UpdatePage() {
   const me = await requireCurrentMember()
@@ -38,25 +53,19 @@ export default async function UpdatePage() {
     return <NoMeetingState />
   }
 
-  const [
-    { data: existingUpdate },
-    { data: formatsRaw },
-    { data: pastUpdates },
-  ] = await Promise.all([
+  const [{ data: existingUpdate }, { data: formatsRaw }, { data: pastUpdates }] = await Promise.all([
     supabase
       .from("updates")
-      .select("content, ready")
+      .select("meeting_id, content_enc, content, ready, qol_physical, qol_mental, qol_financial, qol_friends")
       .eq("member_id", me.id)
       .eq("meeting_id", nextMeeting.id)
       .maybeSingle(),
     supabase
       .from("exploration_formats")
-      .select(
-        "code, category, display_name, default_minutes, short_description, moderator_instructions, source_attribution"
-      ),
+      .select("code, category, display_name, default_minutes, short_description, moderator_instructions, source_attribution"),
     supabase
       .from("updates")
-      .select("content, completed_at, meeting_id")
+      .select("meeting_id, content_enc, content, completed_at, qol_physical, qol_mental, qol_financial, qol_friends")
       .eq("member_id", me.id)
       .neq("meeting_id", nextMeeting.id)
       .not("completed_at", "is", null)
@@ -65,32 +74,23 @@ export default async function UpdatePage() {
   ])
 
   const formats = (formatsRaw ?? []) as ExplorationFormat[]
+  const past = (pastUpdates ?? []) as Row[]
 
-  // Pull past QoL values for sparklines (oldest → newest).
-  const qolHistory = (pastUpdates ?? [])
-    .reverse()
-    .map((u) => {
-      const c = u.content as { qol?: Record<string, number> } | null
-      return c?.qol ?? null
-    })
-    .filter(Boolean) as Array<Record<string, number>>
-
-  let initialContent: UpdateContent = emptyUpdateContent
-  if (existingUpdate?.content) {
-    const parsed = updateContentSchema.safeParse(existingUpdate.content)
-    if (parsed.success) initialContent = parsed.data
-  }
+  // Past QoL values for sparklines (oldest → newest) — metadata, no decryption needed.
+  const qolHistory = [...past].reverse().map(qolOf).filter(Boolean) as Array<Record<string, number>>
 
   const meetingLabel = formatMeeting(nextMeeting.scheduled_at, "EEE MMM d", me.forum.timezone)
 
   return (
-    <UpdateBuilder
+    <UpdateBuilderGate
+      member={{ id: me.id, email: me.email, name: me.name, forumName: me.forum.name }}
       meetingId={nextMeeting.id}
       meetingLabel={meetingLabel}
-      initialContent={initialContent}
+      current={existingUpdate ? toRow(existingUpdate as Row) : null}
       initialReady={existingUpdate?.ready ?? false}
       formats={formats}
       qolHistory={qolHistory}
+      recent={past.slice(0, 3).map(toRow)}
       // Interview questions are voiced by OpenAI when a key is configured;
       // otherwise the browser's own voice.
       naturalVoice={!!process.env.OPENAI_API_KEY}
