@@ -4,7 +4,7 @@
 // control writes straight to the server through store.host("settings", …)
 // and the sheet re-renders from state.settings; only text being typed is
 // kept locally until it is committed (blur or Enter).
-import { useRef, useState, type ReactNode } from "react"
+import { useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { ArrowDown, ArrowUp, Dices, Lightbulb, Minus, Plus } from "lucide-react"
 
 import { errorText, fetchIdeas } from "@/lib/saladbowl/api"
@@ -19,6 +19,44 @@ const SKIP_ORDER: SkipRule[] = ["none", "one", "unlimited"]
 // Ready-made themes whose only natural answers are names: hidden while the
 // "no proper nouns" rule is on.
 const NAME_ONLY_PRESETS = ["Famous people", "Brands"]
+// Two-word examples for the "Which words need the letter?" notes: the first
+// has every word on the letter, the second only its first word. Letters with
+// no natural pair are left out and get a note without an example.
+const LETTER_EXAMPLES: Record<string, [every: string, first: string]> = {
+  A: ["Adam's apple", "Air guitar"],
+  B: ["Big Ben", "Banana split"],
+  C: ["Candy cane", "Corn dog"],
+  D: ["Donald Duck", "Disco ball"],
+  E: ["Easter egg", "Electric guitar"],
+  F: ["French fries", "Fire truck"],
+  G: ["Golden Gate", "Guitar solo"],
+  H: ["Hula hoop", "Hot dog"],
+  I: ["Indigo ink", "Ice cream"],
+  J: ["Jumping jack", "Jelly bean"],
+  K: ["King Kong", "Kitchen sink"],
+  L: ["Lava lamp", "Light bulb"],
+  M: ["Mickey Mouse", "Movie star"],
+  N: ["Night nurse", "Nail polish"],
+  O: ["Olive oil", "Orange juice"],
+  P: ["Peter Pan", "Pop star"],
+  Q: ["Quick quiz", "Queen bee"],
+  R: ["Road Runner", "Rock star"],
+  S: ["Solar system", "Snow globe"],
+  T: ["Taco Tuesday", "Tour bus"],
+  V: ["Vice versa", "Vinyl record"],
+  W: ["Wild West", "Wedding cake"],
+}
+
+/** The "this throws words out, sure?" box under a control. */
+const CONFIRM_BOX: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+  border: "2.5px solid var(--sb-ink)",
+  borderRadius: 12,
+  padding: 12,
+  background: "#fff",
+}
 
 /** A random entry (only ever called from a tap, never while rendering). */
 function pickOne(list: string[]): string {
@@ -39,6 +77,9 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
   // that tapping a button straight after typing is never swallowed).
   const [working, setWorking] = useState(false)
   const [askLetter, setAskLetter] = useState<string | null>(null)
+  // A stricter word rule waiting for a yes: "one" = one word only, "every" =
+  // every word on the letter.
+  const [askWords, setAskWords] = useState<"one" | "every" | null>(null)
   const [themeIdeas, setThemeIdeas] = useState<string[]>([])
   const [ideasBusy, setIdeasBusy] = useState(false)
   const [ideasError, setIdeasError] = useState<string | null>(null)
@@ -49,6 +90,12 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
   const noProperNouns = s.noProperNouns === true
   // The other way round for the idea machine: no value means "on", only false is "off".
   const aiHelper = s.aiHelper !== false
+  // Phrases are allowed unless the host said otherwise: only false is "one word only".
+  const multiWord = s.multiWord !== false
+  // The host's choice, kept even while it has no effect (no letter, or one word only).
+  const everyWord = s.everyWord === true
+  // The examples include famous names, so they are left out under "no proper nouns".
+  const examples = s.letter && !noProperNouns ? LETTER_EXAMPLES[s.letter] : undefined
 
   async function saveQuietly(patch: Partial<Settings>): Promise<boolean> {
     const res = await store.host("settings", patch)
@@ -94,6 +141,8 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
       setAskLetter(null)
       return
     }
+    // A pending "every word" question was about the old letter.
+    if (askWords === "every") setAskWords(null)
     // Only a NEW letter throws words out; going back to "any" never does.
     if (letter !== "" && wordsExist) {
       setAskLetter(letter)
@@ -107,6 +156,41 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
     if (!askLetter) return
     await save({ letter: askLetter })
     setAskLetter(null)
+  }
+
+  // ── multiple words ──
+  // Like a new letter, a stricter rule throws out the words that break it, so
+  // it asks first once words exist. Loosening a rule never throws anything out.
+  function pickMultiWord(on: boolean) {
+    if (on === multiWord) {
+      if (askWords === "one") setAskWords(null)
+      return
+    }
+    if (!on && wordsExist) {
+      setAskWords("one")
+      return
+    }
+    setAskWords(null)
+    void save({ multiWord: on })
+  }
+
+  function pickEveryWord(on: boolean) {
+    if (on === everyWord) {
+      if (askWords === "every") setAskWords(null)
+      return
+    }
+    if (on && wordsExist) {
+      setAskWords("every")
+      return
+    }
+    setAskWords(null)
+    void save({ everyWord: on })
+  }
+
+  async function confirmWords() {
+    if (!askWords) return
+    await save(askWords === "one" ? { multiWord: false } : { everyWord: true })
+    setAskWords(null)
   }
 
   // ── teams ──
@@ -254,7 +338,7 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
       </Section>
 
       {/* ── letter ── */}
-      <Section title="Starting letter" note="Optional. Pick a letter and every word has to start with it.">
+      <Section title="Starting letter" note="Optional. Pick a letter and every entry has to start with it.">
         <div className="sb-seg" style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
           <button
             type="button"
@@ -271,7 +355,7 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
               type="button"
               style={{ minWidth: 0, padding: 0 }}
               aria-pressed={s.letter === letter}
-              aria-label={`Words start with ${letter}`}
+              aria-label={`Entries start with ${letter}`}
               disabled={working}
               onClick={() => pickLetter(letter)}
             >
@@ -280,13 +364,14 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
           ))}
         </div>
         {askLetter && (
-          <div className="sb-pop" role="alert" style={{ display: "flex", flexDirection: "column", gap: 10, border: "2.5px solid var(--sb-ink)", borderRadius: 12, padding: 12, background: "#fff" }}>
+          <div className="sb-pop" role="alert" style={CONFIRM_BOX}>
             <p className="sb-cond" style={{ margin: 0, fontSize: "1.05rem" }}>
               Switch to {askLetter}?
             </p>
             <p style={{ margin: 0, fontSize: "0.95rem" }}>
-              Words are already in the bowl. Any that do not start with {askLetter} get thrown out, and whoever wrote them has to write new
-              ones.
+              Words are already in the bowl.{" "}
+              {multiWord && everyWord ? `Any with a word that does not start with ${askLetter}` : `Any that do not start with ${askLetter}`} get
+              thrown out, and whoever wrote them has to write new ones.
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Button size="sm" variant="pink" disabled={working} onClick={confirmLetter}>
@@ -297,6 +382,89 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
               </Button>
             </div>
           </div>
+        )}
+      </Section>
+
+      {/* ── multiple words ── */}
+      <Section
+        title="Multiple words"
+        note={
+          multiWord
+            ? "Entries can be more than one word, like ice cream."
+            : "One word per entry. Hyphens are fine: T-shirt counts as one."
+        }
+      >
+        <div className="sb-seg" role="group" aria-label="Multiple words">
+          <button type="button" aria-pressed={multiWord} disabled={working} onClick={() => pickMultiWord(true)}>
+            Allowed
+          </button>
+          <button type="button" aria-pressed={!multiWord} disabled={working} onClick={() => pickMultiWord(false)}>
+            One word only
+          </button>
+        </div>
+        {askWords === "one" && multiWord && (
+          <div className="sb-pop" role="alert" style={CONFIRM_BOX}>
+            <p className="sb-cond" style={{ margin: 0, fontSize: "1.05rem" }}>
+              Switch to one word only?
+            </p>
+            <p style={{ margin: 0, fontSize: "0.95rem" }}>
+              Words are already in the bowl. Any with more than one word get handed back to whoever wrote them to write again.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Button size="sm" variant="pink" disabled={working} onClick={confirmWords}>
+                Yes, one word only
+              </Button>
+              <Button size="sm" variant="paper" disabled={working} onClick={() => setAskWords(null)}>
+                Keep phrases
+              </Button>
+            </div>
+          </div>
+        )}
+        {/* Only a question while phrases are allowed, and only bites with a letter set. */}
+        {multiWord && (
+          <>
+            <span className="sb-fieldlabel" id="sb-every-word">
+              Which words need the letter?
+            </span>
+            <div className="sb-seg" role="group" aria-labelledby="sb-every-word" style={s.letter ? undefined : { opacity: 0.45 }}>
+              <button type="button" aria-pressed={!everyWord} disabled={working || !s.letter} onClick={() => pickEveryWord(false)}>
+                Just the first
+              </button>
+              <button type="button" aria-pressed={everyWord} disabled={working || !s.letter} onClick={() => pickEveryWord(true)}>
+                Every word
+              </button>
+            </div>
+            <p style={{ margin: 0, fontSize: "0.92rem" }}>
+              {!s.letter
+                ? "Pick a starting letter first. Without one this changes nothing."
+                : everyWord
+                  ? examples
+                    ? `Every word starts with ${s.letter}: ${examples[0]} works, ${examples[1]} does not.`
+                    : `Every word in an entry has to start with ${s.letter}.`
+                  : examples
+                    ? `Only the first letter counts: ${examples[1]} works for ${s.letter}.`
+                    : `Only the first letter of an entry has to be ${s.letter}.`}
+            </p>
+            {askWords === "every" && s.letter && !everyWord && (
+              <div className="sb-pop" role="alert" style={CONFIRM_BOX}>
+                <p className="sb-cond" style={{ margin: 0, fontSize: "1.05rem" }}>
+                  Switch to every word?
+                </p>
+                <p style={{ margin: 0, fontSize: "0.95rem" }}>
+                  Words are already in the bowl. Any with a word that does not start with {s.letter} get handed back to whoever wrote them to
+                  write again.
+                </p>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <Button size="sm" variant="pink" disabled={working} onClick={confirmWords}>
+                    Yes, every word
+                  </Button>
+                  <Button size="sm" variant="paper" disabled={working} onClick={() => setAskWords(null)}>
+                    Keep just the first
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </Section>
 

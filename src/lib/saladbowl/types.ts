@@ -33,6 +33,18 @@ export interface Settings {
    * `!== false`. (The host's own theme ideas are not affected.)
    */
   aiHelper?: boolean
+  /**
+   * May an entry be more than one word ("ice cream")? On by default; when
+   * off the game refuses anything with a space (hyphenated words count as
+   * one word). Absent in older games, so test with `!== false`.
+   */
+  multiWord?: boolean
+  /**
+   * Only matters with a starting letter set and multiple words allowed:
+   * true = EVERY word must start with the letter ("Big Ben"), false = just
+   * the first ("Banana split"). Off by default; test with `=== true`.
+   */
+  everyWord?: boolean
   teams: { name: string }[] // 2–4; index = team number
   rounds: RoundType[] // always all three, in play order
 }

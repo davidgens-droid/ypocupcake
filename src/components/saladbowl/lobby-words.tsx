@@ -14,12 +14,14 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
   const [text, setText] = useState("")
   // n changes on every failure so the message re-pops even for the same error.
   const [error, setError] = useState<{ text: string; n: number } | null>(null)
-  // A batch only fits the theme, letter and proper-noun rule it was asked under.
-  const [ideas, setIdeas] = useState<{ list: string[]; theme: string; letter: string; noProperNouns: boolean }>({
+  // A batch only fits the theme, letter, proper-noun and word-shape rules it was asked under.
+  const [ideas, setIdeas] = useState<{ list: string[]; theme: string; letter: string; noProperNouns: boolean; multiWord: boolean; everyWord: boolean }>({
     list: [],
     theme: "",
     letter: "",
     noProperNouns: false,
+    multiWord: true,
+    everyWord: false,
   })
   const [ideasBusy, setIdeasBusy] = useState(false)
   const [ideasError, setIdeasError] = useState<string | null>(null)
@@ -37,13 +39,25 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
   // The host's idea machine switch. Old games carry no value and it is allowed
   // in them: only false is "off".
   const aiHelper = state.settings.aiHelper !== false
+  // Phrases are allowed unless the host said otherwise (old games carry no
+  // value): only false is "one word only". "Every word on the letter" is only
+  // true when the host switched it on; it is in force with phrases allowed and
+  // a letter set.
+  const multiWord = state.settings.multiWord !== false
+  const everyWord = state.settings.everyWord === true
+  const wordRule = !multiWord ? "One word only tonight, no spaces." : everyWord && letter ? `Every word has to start with ${letter}.` : null
   const count = me.words.length
   const full = count >= per
   const adding = snap.pending === "word:add"
   const removing = snap.pending === "word:remove"
   const hostName = state.players.find((p) => p.host)?.name ?? "the host"
   const mine = new Set(me.words.map((w) => w.text.trim().toLowerCase()))
-  const ideasFit = ideas.theme === state.settings.theme && ideas.letter === letter && ideas.noProperNouns === noProperNouns
+  const ideasFit =
+    ideas.theme === state.settings.theme &&
+    ideas.letter === letter &&
+    ideas.noProperNouns === noProperNouns &&
+    ideas.multiWord === multiWord &&
+    ideas.everyWord === everyWord
   // No chips at all while the host has the idea machine switched off.
   const shownIdeas = aiHelper && ideasFit ? ideas.list.filter((idea) => !mine.has(idea.trim().toLowerCase())) : []
 
@@ -96,6 +110,8 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
     const forTheme = state.settings.theme
     const forLetter = state.settings.letter
     const forNoProperNouns = noProperNouns
+    const forMultiWord = multiWord
+    const forEveryWord = everyWord
     const res = await fetchIdeas(state.code, token, "words")
     setIdeasBusy(false)
     // The host switched the idea machine off while this was in the air: the
@@ -118,6 +134,8 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
       theme: forTheme,
       letter: forLetter,
       noProperNouns: forNoProperNouns,
+      multiWord: forMultiWord,
+      everyWord: forEveryWord,
     })
   }
 
@@ -170,7 +188,7 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 maxLength={40}
-                placeholder={letter ? `Starts with ${letter}` : "Type a word"}
+                placeholder={letter ? `Starts with ${letter}` : multiWord ? "Type a word" : "Type one word"}
                 aria-label={`Word ${count + 1} of ${per}`}
                 aria-invalid={error ? true : undefined}
                 autoComplete="off"
@@ -184,6 +202,9 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
             </Button>
           </form>
           <p style={{ margin: "10px 0 0", fontSize: "0.95rem" }}>
+            {/* The rule the game enforces comes first, in bold; the rest is advice. */}
+            {wordRule && <b>{wordRule}</b>}
+            {wordRule && " "}
             {noProperNouns ? "Everyday things only: no names of people, places, brands or titles." : "Names, places, things."} Pick something your
             team can guess, act out, and sum up in one word.
           </p>

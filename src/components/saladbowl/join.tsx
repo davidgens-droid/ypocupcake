@@ -38,6 +38,10 @@ export function JoinScreen({ store, snap, state }: ScreenProps) {
   const playing = state.status === "playing"
   const host = state.players.find((p) => p.host)
   const { settings } = state
+  // The word-shape rule in force. Old games carry no values: phrases allowed,
+  // first letter only. "Every word" needs phrases allowed and a letter set.
+  const oneWord = settings.multiWord === false
+  const everyWord = !oneWord && settings.everyWord === true && settings.letter !== ""
 
   function fail(text: string) {
     setProblem((p) => ({ text, n: (p?.n ?? 0) + 1 }))
@@ -203,8 +207,21 @@ export function JoinScreen({ store, snap, state }: ScreenProps) {
                 <div className="sb-row">
                   <span className="sb-row-key">Letter</span>
                   <div className="sb-row-grow">
-                    <div className="sb-row-title">Starts with {settings.letter}</div>
-                    <div style={rowNote}>Every word has to begin with it.</div>
+                    <div className="sb-row-title">
+                      {everyWord ? "Every word starts with" : "Starts with"} {settings.letter}
+                    </div>
+                    <div style={rowNote}>
+                      {everyWord ? "Write more than one word and each of them has to begin with it." : "Everything you write has to begin with it."}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {oneWord && !playing && (
+                <div className="sb-row">
+                  <span className="sb-row-key">Rule</span>
+                  <div className="sb-row-grow">
+                    <div className="sb-row-title">One word only</div>
+                    <div style={rowNote}>No spaces. Hyphens are fine: T-shirt counts as one.</div>
                   </div>
                 </div>
               )}

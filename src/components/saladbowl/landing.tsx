@@ -136,7 +136,7 @@ export function Landing() {
   const [draft, setDraft] = useState<string | null>(null)
   const [code, setCode] = useState("")
   const [theme, setTheme] = useState("")
-  // "" = any letter; otherwise every word must start with this letter.
+  // "" = any letter; otherwise every entry must start with this letter.
   const [letter, setLetter] = useState("")
   const [starting, setStarting] = useState(false)
   const [joining, setJoining] = useState(false)
@@ -319,7 +319,7 @@ export function Landing() {
             </div>
             <div className="sb-field">
               <span className="sb-fieldlabel" id="sb-start-letter">
-                Words must start with (optional)
+                Starting letter (optional)
               </span>
               <div
                 className="sb-seg"
@@ -336,7 +336,7 @@ export function Landing() {
                     type="button"
                     style={{ minWidth: 0, padding: 0 }}
                     aria-pressed={letter === l}
-                    aria-label={`Every word starts with ${l}`}
+                    aria-label={`Entries start with ${l}`}
                     onClick={() => setLetter(letter === l ? "" : l)}
                   >
                     {l}
@@ -345,8 +345,8 @@ export function Landing() {
               </div>
               <p style={{ margin: "2px 0 0", fontSize: "0.92rem" }}>
                 {letter
-                  ? `Every word has to start with ${letter}. The game turns away any word that doesn't.`
-                  : "Tap a letter and every word has to start with it. The game turns away any word that doesn't."}{" "}
+                  ? `Every entry has to start with ${letter}. The game turns away anything that doesn't.`
+                  : "Tap a letter and every entry has to start with it. The game turns away anything that doesn't."}{" "}
                 You can change all of this, and set the rest of the rules, on the next screen.
               </p>
             </div>

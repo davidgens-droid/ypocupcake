@@ -344,6 +344,31 @@ async function tests() {
   const ah3 = await host(r3.code, r3.token, "settings", { aiHelper: "nope" })
   ok("a non-boolean value falls back to on", ah3.ok && ah3.state.settings.aiHelper === true, ah3.state?.settings)
 
+  // ── multiple words: allowed or not, and every word on the letter ──────────
+  const mw = await create("Words", { wordsPerPlayer: 10 })
+  let mws = (await state(mw.code, mw.token)).state.settings
+  ok("multiWord defaults to on, everyWord to off", mws.multiWord === true && mws.everyWord === false, mws)
+  ok("by default a phrase is fine", (await addWord(mw.code, mw.token, "ice cream")).ok)
+  await addWord(mw.code, mw.token, "T-shirt")
+  await addWord(mw.code, mw.token, "pancake")
+  const mw1 = await host(mw.code, mw.token, "settings", { multiWord: false })
+  ok("one word only: existing phrases go back to their author, single and hyphenated words stay", mw1.ok && mw1.state.settings.multiWord === false && JSON.stringify(mw1.state.me.words.map((w) => w.text)) === '["T-shirt","pancake"]', mw1.state?.me?.words)
+  ok("one word only: a phrase is refused with one_word", (await addWord(mw.code, mw.token, "hot dog")).error === "one_word")
+  ok("one word only: a hyphenated word counts as one", (await addWord(mw.code, mw.token, "merry-go-round")).ok)
+  const mw2 = await host(mw.code, mw.token, "settings", { multiWord: true, letter: "B", everyWord: true })
+  ok("switching to letter B clears the non-B words", mw2.ok && mw2.state.me.words.length === 0 && mw2.state.settings.everyWord === true, mw2.state?.me?.words)
+  ok("every word on the letter: 'Big Ben' is fine", (await addWord(mw.code, mw.token, "Big Ben")).ok)
+  ok("…'Banana split' is refused with every_word", (await addWord(mw.code, mw.token, "Banana split")).error === "every_word")
+  ok("…'Bowl of beans' is refused too (small words count)", (await addWord(mw.code, mw.token, "Bowl of beans")).error === "every_word")
+  ok("…a word not on the letter at all is still 'letter'", (await addWord(mw.code, mw.token, "Apple")).error === "letter")
+  ok("…a single B word is fine", (await addWord(mw.code, mw.token, "Balloon")).ok)
+  const mw3 = await host(mw.code, mw.token, "settings", { everyWord: false })
+  ok("first word only: 'Banana split' is accepted again", mw3.ok && (await addWord(mw.code, mw.token, "Banana split")).ok)
+  const mw4 = await host(mw.code, mw.token, "settings", { everyWord: true })
+  ok("turning every-word back on hands 'Banana split' back", mw4.ok && JSON.stringify(mw4.state.me.words.map((w) => w.text)) === '["Big Ben","Balloon"]', mw4.state?.me?.words)
+  const mw5 = await host(mw.code, mw.token, "settings", { letter: "", multiWord: "nope", everyWord: 1 })
+  ok("non-boolean values fall back to the defaults", mw5.ok && mw5.state.settings.multiWord === true && mw5.state.settings.everyWord === false, mw5.state?.settings)
+
   // ── got-it → undo → got-it is not a free skip ─────────────────────────────
   const gz = await setup(4, { skipRule: "none" }, 3)
   sn = (await host(gz.code, gz.hostToken, "start")).state

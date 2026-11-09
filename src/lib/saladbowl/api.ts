@@ -147,6 +147,10 @@ export function errorText(code: string): string {
       return "That didn't look right. Try again."
     case "letter":
       return "That doesn't start with tonight's letter."
+    case "one_word":
+      return "One word only tonight. No spaces."
+    case "every_word":
+      return "Every word has to start with tonight's letter."
     case "duplicate":
       return "Great minds! That one's already in the bowl. Pick another."
     case "not_host":

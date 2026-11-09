@@ -169,6 +169,36 @@ as $$
   select btrim(regexp_replace(regexp_replace(lower(coalesce(p, '')), '[[:punct:]]', '', 'g'), '\s+', ' ', 'g'))
 $$;
 
+-- Does a word (in its comparison form) fit the host's word rules? Returns
+-- null when it does, else the error code to show:
+--   'one_word'   multiple words are switched off and this has a space
+--   'letter'     a starting letter is set and the entry does not start with it
+--   'every_word' "every word on the letter" is on and some word does not
+-- Hyphenated words count as one word (punctuation is already stripped).
+create function saladbowl__word_error(p_norm text, p_settings jsonb) returns text
+language plpgsql immutable set search_path = public
+as $$
+declare
+  v_letter text := coalesce(p_settings->>'letter', '');
+  v_multi boolean := coalesce((p_settings->>'multiWord')::boolean, true);
+  v_every boolean := coalesce((p_settings->>'everyWord')::boolean, false);
+begin
+  if not v_multi and position(' ' in p_norm) > 0 then
+    return 'one_word';
+  end if;
+  if v_letter <> '' then
+    if upper(left(p_norm, 1)) <> v_letter then
+      return 'letter';
+    end if;
+    if v_multi and v_every and exists (
+         select 1 from unnest(string_to_array(p_norm, ' ')) as t(w)
+         where t.w <> '' and upper(left(t.w, 1)) <> v_letter) then
+      return 'every_word';
+    end if;
+  end if;
+  return null;
+end $$;
+
 -- Validate + normalise host settings. p is merged over p_old (shallow).
 create function saladbowl__settings(p jsonb, p_old jsonb) returns jsonb
 language plpgsql immutable set search_path = public
@@ -182,6 +212,8 @@ declare
   v_carry boolean := true;
   v_no_proper boolean := false;
   v_ai_helper boolean := true;
+  v_multi boolean := true;
+  v_every boolean := false;
   v_teams jsonb := '[]'::jsonb;
   v_rounds jsonb := '[]'::jsonb;
   v_defaults text[] := array['Lettuce Zeppelin', 'The Beet-les', 'Radishhead', 'Kale Halen'];
@@ -210,6 +242,12 @@ begin
   -- (on by default). The /api/saladbowl/ideas route reads it and refuses
   -- word ideas when it is off.
   if jsonb_typeof(v->'aiHelper') = 'boolean' then v_ai_helper := (v->>'aiHelper')::boolean; end if;
+  -- multiWord: may an entry be more than one word ("ice cream")? On by default.
+  -- everyWord: with a starting letter set and multiple words allowed, must
+  -- EVERY word start with the letter ("Big Ben"), not just the first? Off by
+  -- default. Both are enforced by saladbowl__word_error.
+  if jsonb_typeof(v->'multiWord') = 'boolean' then v_multi := (v->>'multiWord')::boolean; end if;
+  if jsonb_typeof(v->'everyWord') = 'boolean' then v_every := (v->>'everyWord')::boolean; end if;
 
   if jsonb_typeof(v->'teams') = 'array' then
     v_n := least(greatest(jsonb_array_length(v->'teams'), 2), 4);
@@ -246,6 +284,8 @@ begin
     'carryOver', v_carry,
     'noProperNouns', v_no_proper,
     'aiHelper', v_ai_helper,
+    'multiWord', v_multi,
+    'everyWord', v_every,
     'teams', v_teams,
     'rounds', v_rounds
   );
@@ -762,9 +802,10 @@ begin
   if (select count(*) from saladbowl_words where player_id = me.id) >= (g.settings->>'wordsPerPlayer')::int then
     return jsonb_build_object('ok', false, 'error', 'full');
   end if;
-  v_letter := g.settings->>'letter';
-  if v_letter <> '' and upper(left(v_norm, 1)) <> v_letter then
-    return jsonb_build_object('ok', false, 'error', 'letter');
+  -- Starting letter / one word only / every word on the letter.
+  v_letter := saladbowl__word_error(v_norm, g.settings);
+  if v_letter is not null then
+    return jsonb_build_object('ok', false, 'error', v_letter);
   end if;
   if exists (select 1 from saladbowl_words where game_id = g.id and norm = v_norm) then
     return jsonb_build_object('ok', false, 'error', 'duplicate');
@@ -846,7 +887,9 @@ begin
         'rounds', g.settings->'rounds',
         'wordsPerPlayer', g.settings->'wordsPerPlayer',
         'letter', g.settings->'letter',
-        'noProperNouns', coalesce(g.settings->'noProperNouns', 'false'::jsonb));
+        'noProperNouns', coalesce(g.settings->'noProperNouns', 'false'::jsonb),
+        'multiWord', coalesce(g.settings->'multiWord', 'true'::jsonb),
+        'everyWord', coalesce(g.settings->'everyWord', 'false'::jsonb));
       if jsonb_array_length(v_new->'teams') <> v_n then
         v_new := v_new || jsonb_build_object('teams', g.settings->'teams');
       end if;
@@ -860,10 +903,13 @@ begin
         from saladbowl_words where game_id = g.id
       ) x
       where w.id = x.id and x.rn > (v_new->>'wordsPerPlayer')::int;
-      -- New letter rule: words that break it go back to their authors.
-      if (v_new->>'letter') <> '' and (v_new->>'letter') is distinct from (g.settings->>'letter') then
-        delete from saladbowl_words
-          where game_id = g.id and upper(left(norm, 1)) <> (v_new->>'letter');
+      -- Changed word rules (starting letter, one word only, every word on
+      -- the letter): words that break the new rules go back to their authors.
+      if (v_new->>'letter') is distinct from (g.settings->>'letter')
+         or (v_new->'multiWord') is distinct from coalesce(g.settings->'multiWord', 'true'::jsonb)
+         or (v_new->'everyWord') is distinct from coalesce(g.settings->'everyWord', 'false'::jsonb) then
+        delete from saladbowl_words w
+          where w.game_id = g.id and saladbowl__word_error(w.norm, v_new) is not null;
       end if;
     end if;
     update saladbowl_games set settings = v_new where id = g.id;

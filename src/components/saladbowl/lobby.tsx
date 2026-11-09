@@ -74,7 +74,7 @@ function HostTheme({ store, theme, letter, everyday }: { store: ScreenProps["sto
       {!theme && (
         <p style={{ margin: 0, fontSize: "0.95rem" }}>
           {letter
-            ? `No theme set yet: any word that starts with ${letter}. Add a theme before people start writing if you want one.`
+            ? `No theme set yet: anything that starts with ${letter}. Add a theme before people start writing if you want one.`
             : everyday
               ? "No theme set yet: any everyday thing, no proper nouns. Add a theme before people start writing if you want one."
               : "No theme set yet, so anything goes. Pick one before people start writing."}
@@ -101,6 +101,9 @@ function HostDesk({ settings, nudge, onRules }: { settings: Settings; nudge: boo
     `${s.turnSeconds} second turns`,
     `${s.teams.length} teams`,
     s.letter ? `Starts with ${s.letter}` : "Any starting letter",
+    // Old games carry no value and allow phrases: only false is "one word only".
+    // "Every word" is only in force with phrases allowed and a letter set.
+    s.multiWord === false ? "One word only" : s.everyWord === true && s.letter ? `Every word starts with ${s.letter}` : "Phrases allowed",
     s.noProperNouns === true ? "No proper nouns" : "Proper nouns allowed",
     // Games made before this switch existed carry no value: only false is "off".
     s.aiHelper !== false ? "Idea machine on" : "Idea machine off",
@@ -151,6 +154,10 @@ export function Lobby({ store, snap, state }: ScreenProps) {
   if (!me) return null
 
   const s = state.settings
+  // The word-shape rule in force. Old games carry no values: phrases allowed,
+  // first letter only. "Every word" needs phrases allowed and a letter set.
+  const oneWord = s.multiWord === false
+  const everyWord = !oneWord && s.everyWord === true && s.letter !== ""
   const isHost = me.host
   const per = s.wordsPerPlayer
   const players = state.players
@@ -216,7 +223,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
         }
         hostShortcut={
           me.host
-            ? { label: "Set list & rules", note: "Theme, starting letter, proper nouns, the idea machine, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
+            ? { label: "Set list & rules", note: "Theme, starting letter, multiple words, proper nouns, the idea machine, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
             : undefined
         }
       />
@@ -239,7 +246,12 @@ export function Lobby({ store, snap, state }: ScreenProps) {
           {theme || (s.letter ? `Anything starting with ${s.letter}` : s.noProperNouns === true ? "Any everyday thing" : "Anything goes")}
         </Display>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          {s.letter && <Stamp>Starts with {s.letter}</Stamp>}
+          {s.letter && (
+            <Stamp>
+              {everyWord ? "Every word starts with" : "Starts with"} {s.letter}
+            </Stamp>
+          )}
+          {oneWord && <Stamp>One word only</Stamp>}
           {s.noProperNouns === true && <Stamp>No proper nouns</Stamp>}
           <span className="sb-cond" style={{ fontSize: "1.05rem" }}>
             {per} {per === 1 ? "word" : "words"} each
@@ -375,6 +387,21 @@ export function Lobby({ store, snap, state }: ScreenProps) {
           <div className="sb-setlist-head">
             <span>House rules</span>
           </div>
+          {(oneWord || everyWord) && (
+            <div className="sb-row" style={{ alignItems: "flex-start" }}>
+              <span className="sb-row-key" style={{ minWidth: 0, width: 56, flex: "none", paddingTop: 2 }}>
+                Words
+              </span>
+              <div className="sb-row-grow">
+                <div className="sb-row-title">{oneWord ? "One word only" : `Every word starts with ${s.letter}`}</div>
+                <div style={{ fontSize: "0.92rem", marginTop: 2 }}>
+                  {oneWord
+                    ? "No spaces. Hyphens are fine: T-shirt counts as one."
+                    : `Write more than one word and each of them has to start with ${s.letter}.`}
+                </div>
+              </div>
+            </div>
+          )}
           {s.noProperNouns === true && (
             <div className="sb-row" style={{ alignItems: "flex-start" }}>
               <span className="sb-row-key" style={{ minWidth: 0, width: 56, flex: "none", paddingTop: 2 }}>

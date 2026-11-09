@@ -234,6 +234,10 @@ function TvLobby({ state, view, info }: { state: GameState; view: View; info: Fr
   if (loose.length) groups.push({ team: null, name: "No team yet", players: loose })
   const theme = state.settings.theme.trim()
   const noProperNouns = state.settings.noProperNouns === true
+  // The word-shape rule in force. Old games carry no values: phrases allowed,
+  // first letter only. "Every word" needs phrases allowed and a letter set.
+  const oneWord = state.settings.multiWord === false
+  const everyWord = !oneWord && state.settings.everyWord === true && state.settings.letter !== ""
 
   return (
     <Frame info={info}>
@@ -284,11 +288,16 @@ function TvLobby({ state, view, info }: { state: GameState; view: View; info: Fr
                 ring="var(--sb-yellow)"
               />
             </div>
-            {(state.settings.letter || noProperNouns) && (
+            {(state.settings.letter || oneWord || noProperNouns) && (
               <p style={{ margin: "12px 0 0", display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {state.settings.letter && (
                   <span className="sb-label sb-label--yellow" style={{ whiteSpace: "normal", fontSize: fs(0.78, 1.2, 1.2) }}>
-                    Every word starts with {state.settings.letter}
+                    {everyWord ? "Every word starts with" : "Starts with"} {state.settings.letter}
+                  </span>
+                )}
+                {oneWord && (
+                  <span className="sb-label sb-label--yellow" style={{ whiteSpace: "normal", fontSize: fs(0.78, 1.2, 1.2) }}>
+                    One word only: no spaces
                   </span>
                 )}
                 {noProperNouns && (
