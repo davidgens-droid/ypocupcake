@@ -198,7 +198,7 @@ function RoomMenu({
         <section>
           <Kicker tone="ink">How to play</Kicker>
           <div style={{ marginTop: 8 }}>
-            <HowToPlay />
+            <HowToPlay noProperNouns={state.settings.noProperNouns === true} />
           </div>
         </section>
 

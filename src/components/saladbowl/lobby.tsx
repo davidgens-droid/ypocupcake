@@ -22,7 +22,7 @@ import { Button, Card, Display, Kicker, Label, Liner, Marker, Page, Stamp, Tempo
  * Host only: set or change tonight's theme right on the theme card (the
  * first thing a host looks for), with the rest of the rules one tap away.
  */
-function HostTheme({ store, theme, letter }: { store: ScreenProps["store"]; theme: string; letter: string }) {
+function HostTheme({ store, theme, letter, everyday }: { store: ScreenProps["store"]; theme: string; letter: string; everyday: boolean }) {
   // null = not editing; a string = the text being typed.
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -75,7 +75,9 @@ function HostTheme({ store, theme, letter }: { store: ScreenProps["store"]; them
         <p style={{ margin: 0, fontSize: "0.95rem" }}>
           {letter
             ? `No theme set yet: any word that starts with ${letter}. Add a theme before people start writing if you want one.`
-            : "No theme set yet, so anything goes. Pick one before people start writing."}
+            : everyday
+              ? "No theme set yet: any everyday thing, no proper nouns. Add a theme before people start writing if you want one."
+              : "No theme set yet, so anything goes. Pick one before people start writing."}
         </p>
       )}
       <div>
@@ -99,6 +101,7 @@ function HostDesk({ settings, nudge, onRules }: { settings: Settings; nudge: boo
     `${s.turnSeconds} second turns`,
     `${s.teams.length} teams`,
     s.letter ? `Starts with ${s.letter}` : "Any starting letter",
+    s.noProperNouns === true ? "No proper nouns" : "Proper nouns allowed",
     SKIP_RULES[s.skipRule].name,
     s.carryOver ? "Leftover time carries over" : "Leftover time is lost",
   ]
@@ -211,7 +214,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
         }
         hostShortcut={
           me.host
-            ? { label: "Set list & rules", note: "Theme, starting letter, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
+            ? { label: "Set list & rules", note: "Theme, starting letter, proper nouns, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
             : undefined
         }
       />
@@ -231,15 +234,16 @@ export function Lobby({ store, snap, state }: ScreenProps) {
       <Card tape tilt="l" bar="yellow">
         <Kicker tone="ink">Tonight&apos;s theme</Kicker>
         <Display as="h2" variant="pop" size={themeSize} style={{ margin: "8px 0 14px" }}>
-          {theme || (s.letter ? `Anything starting with ${s.letter}` : "Anything goes")}
+          {theme || (s.letter ? `Anything starting with ${s.letter}` : s.noProperNouns === true ? "Any everyday thing" : "Anything goes")}
         </Display>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           {s.letter && <Stamp>Starts with {s.letter}</Stamp>}
+          {s.noProperNouns === true && <Stamp>No proper nouns</Stamp>}
           <span className="sb-cond" style={{ fontSize: "1.05rem" }}>
             {per} {per === 1 ? "word" : "words"} each
           </span>
         </div>
-        {isHost && <HostTheme store={store} theme={theme} letter={s.letter} />}
+        {isHost && <HostTheme store={store} theme={theme} letter={s.letter} everyday={s.noProperNouns === true} />}
       </Card>
 
       {/* ── host: everything you can change ── */}
@@ -369,6 +373,17 @@ export function Lobby({ store, snap, state }: ScreenProps) {
           <div className="sb-setlist-head">
             <span>House rules</span>
           </div>
+          {s.noProperNouns === true && (
+            <div className="sb-row" style={{ alignItems: "flex-start" }}>
+              <span className="sb-row-key" style={{ minWidth: 0, width: 56, flex: "none", paddingTop: 2 }}>
+                Nouns
+              </span>
+              <div className="sb-row-grow">
+                <div className="sb-row-title">No proper nouns</div>
+                <div style={{ fontSize: "0.92rem", marginTop: 2 }}>Everyday things only: no names of people, places, brands or titles.</div>
+              </div>
+            </div>
+          )}
           <div className="sb-row" style={{ alignItems: "flex-start" }}>
             <span className="sb-row-key" style={{ minWidth: 0, width: 56, flex: "none", paddingTop: 2 }}>
               Clock

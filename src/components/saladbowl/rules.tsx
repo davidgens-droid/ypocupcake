@@ -64,7 +64,8 @@ const stepNumber: CSSProperties = {
   textAlign: "center",
   textShadow: "0.06em 0.06em 0 var(--sb-pink)",
 }
-export function HowToPlay() {
+/** noProperNouns: inside a game with that house rule on, step 1 stops inviting names. */
+export function HowToPlay({ noProperNouns = false }: { noProperNouns?: boolean }) {
   const rounds = ROUND_ORDER.map((type) => ROUNDS[type])
 
   return (
@@ -84,7 +85,11 @@ export function HowToPlay() {
               <span style={stepNumber}>{i + 1}</span>
               <div className="sb-row-grow">
                 <div className="sb-row-title">{step.title}</div>
-                <div style={small}>{step.text}</div>
+                <div style={small}>
+                  {i === 0 && noProperNouns
+                    ? "Everyone secretly types a few words on their own phone. Everyday things only tonight, no names. The host picks the theme."
+                    : step.text}
+                </div>
               </div>
             </li>
           ))}

@@ -208,6 +208,15 @@ export function JoinScreen({ store, snap, state }: ScreenProps) {
                   </div>
                 </div>
               )}
+              {settings.noProperNouns === true && !playing && (
+                <div className="sb-row">
+                  <span className="sb-row-key">Nouns</span>
+                  <div className="sb-row-grow">
+                    <div className="sb-row-title">No proper nouns</div>
+                    <div style={rowNote}>Everyday things only: no names of people, places, brands or titles.</div>
+                  </div>
+                </div>
+              )}
               {playing ? (
                 <>
                   <div className="sb-row">

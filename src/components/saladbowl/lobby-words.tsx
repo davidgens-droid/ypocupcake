@@ -14,8 +14,13 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
   const [text, setText] = useState("")
   // n changes on every failure so the message re-pops even for the same error.
   const [error, setError] = useState<{ text: string; n: number } | null>(null)
-  // A batch only fits the theme and letter it was asked under.
-  const [ideas, setIdeas] = useState<{ list: string[]; theme: string; letter: string }>({ list: [], theme: "", letter: "" })
+  // A batch only fits the theme, letter and proper-noun rule it was asked under.
+  const [ideas, setIdeas] = useState<{ list: string[]; theme: string; letter: string; noProperNouns: boolean }>({
+    list: [],
+    theme: "",
+    letter: "",
+    noProperNouns: false,
+  })
   const [ideasBusy, setIdeasBusy] = useState(false)
   const [ideasError, setIdeasError] = useState<string | null>(null)
   const [asked, setAsked] = useState(false)
@@ -27,13 +32,15 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
 
   const per = state.settings.wordsPerPlayer
   const letter = state.settings.letter
+  // Games made before this rule existed carry no value: only true is "on".
+  const noProperNouns = state.settings.noProperNouns === true
   const count = me.words.length
   const full = count >= per
   const adding = snap.pending === "word:add"
   const removing = snap.pending === "word:remove"
   const hostName = state.players.find((p) => p.host)?.name ?? "the host"
   const mine = new Set(me.words.map((w) => w.text.trim().toLowerCase()))
-  const ideasFit = ideas.theme === state.settings.theme && ideas.letter === letter
+  const ideasFit = ideas.theme === state.settings.theme && ideas.letter === letter && ideas.noProperNouns === noProperNouns
   const shownIdeas = ideasFit ? ideas.list.filter((idea) => !mine.has(idea.trim().toLowerCase())) : []
 
   /** Restart the shake on the text field without remounting it (keeps focus). */
@@ -84,6 +91,7 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
     setIdeasError(null)
     const forTheme = state.settings.theme
     const forLetter = state.settings.letter
+    const forNoProperNouns = noProperNouns
     const res = await fetchIdeas(state.code, token, "words")
     setIdeasBusy(false)
     setAsked(true)
@@ -95,6 +103,7 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
       list: Array.isArray(res.ideas) ? res.ideas.filter((x) => typeof x === "string" && x.trim() !== "") : [],
       theme: forTheme,
       letter: forLetter,
+      noProperNouns: forNoProperNouns,
     })
   }
 
@@ -161,7 +170,8 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
             </Button>
           </form>
           <p style={{ margin: "10px 0 0", fontSize: "0.95rem" }}>
-            Names, places, things. Pick something your team can guess, act out, and sum up in one word.
+            {noProperNouns ? "Everyday things only: no names of people, places, brands or titles." : "Names, places, things."} Pick something your
+            team can guess, act out, and sum up in one word.
           </p>
         </>
       )}

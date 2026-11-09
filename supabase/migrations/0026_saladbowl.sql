@@ -180,6 +180,7 @@ declare
   v_secs int := 60;
   v_skip text;
   v_carry boolean := true;
+  v_no_proper boolean := false;
   v_teams jsonb := '[]'::jsonb;
   v_rounds jsonb := '[]'::jsonb;
   v_defaults text[] := array['Lettuce Zeppelin', 'The Beet-les', 'Radishhead', 'Kale Halen'];
@@ -201,6 +202,9 @@ begin
   v_skip := coalesce(v->>'skipRule', 'one');
   if v_skip not in ('none', 'one', 'unlimited') then v_skip := 'one'; end if;
   if jsonb_typeof(v->'carryOver') = 'boolean' then v_carry := (v->>'carryOver')::boolean; end if;
+  -- House rule shown to everyone while they write (and obeyed by the idea
+  -- helper): no names of people, places, brands or titles. Not machine-checked.
+  if jsonb_typeof(v->'noProperNouns') = 'boolean' then v_no_proper := (v->>'noProperNouns')::boolean; end if;
 
   if jsonb_typeof(v->'teams') = 'array' then
     v_n := least(greatest(jsonb_array_length(v->'teams'), 2), 4);
@@ -235,6 +239,7 @@ begin
     'turnSeconds', v_secs,
     'skipRule', v_skip,
     'carryOver', v_carry,
+    'noProperNouns', v_no_proper,
     'teams', v_teams,
     'rounds', v_rounds
   );
@@ -834,7 +839,8 @@ begin
       v_new := v_new || jsonb_build_object(
         'rounds', g.settings->'rounds',
         'wordsPerPlayer', g.settings->'wordsPerPlayer',
-        'letter', g.settings->'letter');
+        'letter', g.settings->'letter',
+        'noProperNouns', coalesce(g.settings->'noProperNouns', 'false'::jsonb));
       if jsonb_array_length(v_new->'teams') <> v_n then
         v_new := v_new || jsonb_build_object('teams', g.settings->'teams');
       end if;

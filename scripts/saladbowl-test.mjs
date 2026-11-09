@@ -322,6 +322,16 @@ async function tests() {
   const r3b = await host(r3.code, r3.token, "settings", { rounds: ["oneword", "sounds", "describe", "charades", "oneword"] })
   ok("unknown round types are dropped; order is kept", JSON.stringify(r3b.state.settings.rounds) === '["oneword","describe","charades"]', r3b.state?.settings?.rounds)
 
+  // ── the "no proper nouns" house rule is just a stored switch ──────────────
+  ok("noProperNouns defaults to off", r3b.state.settings.noProperNouns === false, r3b.state?.settings)
+  const np1 = await host(r3.code, r3.token, "settings", { noProperNouns: true })
+  ok("host can switch noProperNouns on", np1.ok && np1.state.settings.noProperNouns === true && JSON.stringify(np1.state.settings.rounds) === '["oneword","describe","charades"]', np1.state?.settings)
+  const np2 = await host(r3.code, r3.token, "settings", { theme: "Kitchen things" })
+  ok("…and it survives an unrelated settings change", np2.ok && np2.state.settings.noProperNouns === true && np2.state.settings.theme === "Kitchen things")
+  const np3 = await host(r3.code, r3.token, "settings", { noProperNouns: "yes please" })
+  ok("a non-boolean value falls back to off", np3.ok && np3.state.settings.noProperNouns === false, np3.state?.settings)
+  ok("a spectator can read the rule (it is shown on the join and TV screens)", (await state(r3.code)).state.settings.noProperNouns === false)
+
   // ── got-it → undo → got-it is not a free skip ─────────────────────────────
   const gz = await setup(4, { skipRule: "none" }, 3)
   sn = (await host(gz.code, gz.hostToken, "start")).state

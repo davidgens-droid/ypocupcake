@@ -233,6 +233,7 @@ function TvLobby({ state, view, info }: { state: GameState; view: View; info: Fr
   const loose = state.players.filter((p) => p.team == null || !state.teams[p.team])
   if (loose.length) groups.push({ team: null, name: "No team yet", players: loose })
   const theme = state.settings.theme.trim()
+  const noProperNouns = state.settings.noProperNouns === true
 
   return (
     <Frame info={info}>
@@ -269,7 +270,7 @@ function TvLobby({ state, view, info }: { state: GameState; view: View; info: Fr
               <div style={{ minWidth: 0 }}>
                 <Kick tone="ink">{"Tonight's theme"}</Kick>
                 <Display as="h2" size={fs(1.9, 3.4, 3.4)} style={{ margin: "4px 0 8px" }}>
-                  {theme || "Anything goes"}
+                  {theme || (noProperNouns ? "Any everyday thing" : "Anything goes")}
                 </Display>
                 <p className="sb-cond" style={{ margin: 0, fontSize: fs(0.95, 1.4, 1.4) }}>
                   {plural(need, "word")} each
@@ -283,11 +284,18 @@ function TvLobby({ state, view, info }: { state: GameState; view: View; info: Fr
                 ring="var(--sb-yellow)"
               />
             </div>
-            {state.settings.letter && (
-              <p style={{ margin: "12px 0 0" }}>
-                <span className="sb-label sb-label--yellow" style={{ whiteSpace: "normal", fontSize: fs(0.78, 1.2, 1.2) }}>
-                  Every word starts with {state.settings.letter}
-                </span>
+            {(state.settings.letter || noProperNouns) && (
+              <p style={{ margin: "12px 0 0", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {state.settings.letter && (
+                  <span className="sb-label sb-label--yellow" style={{ whiteSpace: "normal", fontSize: fs(0.78, 1.2, 1.2) }}>
+                    Every word starts with {state.settings.letter}
+                  </span>
+                )}
+                {noProperNouns && (
+                  <span className="sb-label sb-label--yellow" style={{ whiteSpace: "normal", fontSize: fs(0.78, 1.2, 1.2) }}>
+                    No proper nouns: everyday things only
+                  </span>
+                )}
               </p>
             )}
           </Card>

@@ -19,6 +19,13 @@ export interface Settings {
   skipRule: SkipRule
   /** Empty the bowl with time left → keep those seconds into the next round. */
   carryOver: boolean
+  /**
+   * House rule: no names of people, places, brands or titles. Shown to
+   * everyone while they write and obeyed by the idea helper; the game does
+   * not check words against it. Games created before this rule existed have
+   * no value here, so always test it with `=== true`.
+   */
+  noProperNouns?: boolean
   teams: { name: string }[] // 2–4; index = team number
   rounds: RoundType[] // always all three, in play order
 }

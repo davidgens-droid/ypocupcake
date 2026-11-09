@@ -16,6 +16,9 @@ import { Button, Sheet, cx, toast } from "./ui"
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
 const SKIP_ORDER: SkipRule[] = ["none", "one", "unlimited"]
+// Ready-made themes whose only natural answers are names: hidden while the
+// "no proper nouns" rule is on.
+const NAME_ONLY_PRESETS = ["Famous people", "Brands"]
 
 /** A random entry (only ever called from a tap, never while rendering). */
 function pickOne(list: string[]): string {
@@ -42,6 +45,8 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
 
   const s = state.settings
   const wordsExist = state.bowl.total > 0
+  // Games made before this rule existed carry no value: only true is "on".
+  const noProperNouns = s.noProperNouns === true
 
   async function saveQuietly(patch: Partial<Settings>): Promise<boolean> {
     const res = await store.host("settings", patch)
@@ -75,6 +80,13 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
   }
 
   // ── letter ──
+  function pickProperNouns(on: boolean) {
+    if (on === noProperNouns) return
+    // A batch of theme ideas only fits the rule it was asked under.
+    setThemeIdeas([])
+    void save({ noProperNouns: on })
+  }
+
   function pickLetter(letter: string) {
     if (letter === s.letter) {
       setAskLetter(null)
@@ -157,7 +169,7 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
           onCommit={(theme) => saveQuietly({ theme })}
         />
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {THEME_PRESETS.map((preset) => {
+          {THEME_PRESETS.filter((preset) => !noProperNouns || !NAME_ONLY_PRESETS.includes(preset)).map((preset) => {
             // "Anything goes" is the empty theme.
             const value = preset === THEME_PRESETS[0] ? "" : preset
             const on = s.theme === value
@@ -283,6 +295,29 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
               </Button>
             </div>
           </div>
+        )}
+      </Section>
+
+      {/* ── proper nouns ── */}
+      <Section
+        title="Proper nouns"
+        note={
+          noProperNouns
+            ? "No names of people, places, brands or titles. Everyday things only."
+            : "Names, places and titles are fair game."
+        }
+      >
+        <div className="sb-seg" role="group" aria-label="Proper nouns">
+          <button type="button" aria-pressed={!noProperNouns} disabled={working} onClick={() => pickProperNouns(false)}>
+            Allowed
+          </button>
+          <button type="button" aria-pressed={noProperNouns} disabled={working} onClick={() => pickProperNouns(true)}>
+            No proper nouns
+          </button>
+        </div>
+        {/* The game never checks words against this rule, so nothing is thrown out. */}
+        {noProperNouns && wordsExist && (
+          <p style={{ margin: 0, fontSize: "0.92rem" }}>Words already written stay. Ask anyone who used a name to swap it.</p>
         )}
       </Section>
 
