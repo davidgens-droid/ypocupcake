@@ -5,7 +5,7 @@
 import { useState, type FormEvent, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Menu, Tv, UserPlus } from "lucide-react"
+import { Menu, SlidersHorizontal, Tv, UserPlus } from "lucide-react"
 
 import { errorText } from "@/lib/saladbowl/api"
 import { withProfile } from "@/lib/saladbowl/seats"
@@ -19,7 +19,14 @@ import { Button, Kicker, MuteButton, Sheet, TeamDot, toast } from "./ui"
  * Top strip. Inherits the page's text colour, so it works on black and on
  * team-coloured pages. `extra` adds buttons before the menu (e.g. host tools).
  */
-export function TopBar({ store, snap, state, extra }: ScreenProps & { extra?: ReactNode }) {
+/** A host-only shortcut shown at the top of the menu (lobby: the rules; mid-game: host controls). */
+export interface HostShortcut {
+  label: string
+  note: string
+  onClick: () => void
+}
+
+export function TopBar({ store, snap, state, extra, hostShortcut }: ScreenProps & { extra?: ReactNode; hostShortcut?: HostShortcut }) {
   const [open, setOpen] = useState(false)
   const me = state.me
   return (
@@ -49,12 +56,19 @@ export function TopBar({ store, snap, state, extra }: ScreenProps & { extra?: Re
           </button>
         </div>
       </header>
-      <RoomMenu store={store} snap={snap} state={state} open={open} onClose={() => setOpen(false)} />
+      <RoomMenu store={store} snap={snap} state={state} open={open} onClose={() => setOpen(false)} hostShortcut={hostShortcut} />
     </>
   )
 }
 
-function RoomMenu({ store, snap, state, open, onClose }: ScreenProps & { open: boolean; onClose: () => void }) {
+function RoomMenu({
+  store,
+  snap,
+  state,
+  open,
+  onClose,
+  hostShortcut,
+}: ScreenProps & { open: boolean; onClose: () => void; hostShortcut?: HostShortcut }) {
   const router = useRouter()
   const [name, setName] = useState("")
   const [adding, setAdding] = useState(false)
@@ -84,6 +98,24 @@ function RoomMenu({ store, snap, state, open, onClose }: ScreenProps & { open: b
   return (
     <Sheet open={open} onClose={onClose} title="Backstage">
       <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        {hostShortcut && state.me?.host && (
+          <section>
+            <Kicker tone="ink">You&apos;re the host</Kicker>
+            <p style={{ margin: "6px 0 10px", fontSize: "0.95rem" }}>{hostShortcut.note}</p>
+            <div style={{ paddingBottom: 6 }}>
+              <Button
+                variant="yellow"
+                onClick={() => {
+                  onClose()
+                  hostShortcut.onClick()
+                }}
+              >
+                <SlidersHorizontal size={20} /> {hostShortcut.label}
+              </Button>
+            </div>
+          </section>
+        )}
+
         <section>
           <Kicker tone="ink">On this phone</Kicker>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>

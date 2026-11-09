@@ -83,6 +83,11 @@ export function Stage({ store, snap, state }: ScreenProps) {
             </button>
           ) : undefined
         }
+        hostShortcut={
+          me.host
+            ? { label: "Host controls", note: "Pause, end a turn, fix a score, move players or change the timer.", onClick: () => setHostOpen(true) }
+            : undefined
+        }
       />
 
       {/* Where we are in the show: set, rule, bowl, scores. */}

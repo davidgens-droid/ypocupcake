@@ -4,11 +4,11 @@
 // host invites people, sorts the teams, sets the set list and rules, then
 // starts the show.
 import { useState, type FormEvent } from "react"
-import { CaseSensitive, Check, Pencil, QrCode as QrIcon, Shuffle, SlidersHorizontal } from "lucide-react"
+import { Check, Pencil, QrCode as QrIcon, Settings as Gear, Shuffle, SlidersHorizontal } from "lucide-react"
 
 import { errorText } from "@/lib/saladbowl/api"
 import { ROUNDS, SKIP_RULES } from "@/lib/saladbowl/content"
-import type { Player } from "@/lib/saladbowl/types"
+import type { Player, Settings } from "@/lib/saladbowl/types"
 
 import { LobbySettings } from "./lobby-settings"
 import { LobbyWords } from "./lobby-words"
@@ -16,13 +16,13 @@ import { PlayerSheet } from "./player-sheet"
 import type { ScreenProps } from "./props"
 import { TopBar } from "./room-bar"
 import { SharePanel } from "./share"
-import { Button, Card, Display, Kicker, Label, Marker, Page, Stamp, TempoBadge, cx, toast } from "./ui"
+import { Button, Card, Display, Kicker, Label, Liner, Marker, Page, Stamp, TempoBadge, cx, toast } from "./ui"
 
 /**
  * Host only: set or change tonight's theme right on the theme card (the
  * first thing a host looks for), with the rest of the rules one tap away.
  */
-function HostTheme({ store, theme, letter, onRules }: { store: ScreenProps["store"]; theme: string; letter: string; onRules: () => void }) {
+function HostTheme({ store, theme, letter }: { store: ScreenProps["store"]; theme: string; letter: string }) {
   // null = not editing; a string = the text being typed.
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -78,24 +78,66 @@ function HostTheme({ store, theme, letter, onRules }: { store: ScreenProps["stor
             : "No theme set yet, so anything goes. Pick one before people start writing."}
         </p>
       )}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div>
         <Button size="sm" variant={theme ? "paper" : "yellow"} onClick={() => setDraft(theme)}>
           <Pencil size={18} /> {theme ? "Change theme" : "Set the theme"}
-        </Button>
-        <Button size="sm" variant="paper" onClick={onRules}>
-          <CaseSensitive size={20} /> {letter ? `Starts with ${letter}` : "Starts with: any letter"}
-        </Button>
-        <Button size="sm" variant="cyan" onClick={onRules}>
-          <SlidersHorizontal size={18} /> Set list &amp; rules
         </Button>
       </div>
     </div>
   )
 }
 
+/**
+ * Host only: every setting of tonight's game at a glance, each one a button
+ * into the "Set list & rules" sheet, so a first-time host can see straight
+ * away what they are able to change and where.
+ */
+function HostDesk({ settings, nudge, onRules }: { settings: Settings; nudge: boolean; onRules: () => void }) {
+  const s = settings
+  const facts = [
+    `${s.wordsPerPlayer} ${s.wordsPerPlayer === 1 ? "word" : "words"} each`,
+    `${s.turnSeconds} second turns`,
+    `${s.teams.length} teams`,
+    s.letter ? `Starts with ${s.letter}` : "Any starting letter",
+    SKIP_RULES[s.skipRule].name,
+    s.carryOver ? "Leftover time carries over" : "Leftover time is lost",
+  ]
+  return (
+    <Liner label="Host desk">
+      <Display as="h2" size="1.8rem">
+        You set the rules
+      </Display>
+      <p className="sb-muted" style={{ margin: "6px 0 12px", fontSize: "0.95rem" }}>
+        This is how tonight is set up. Tap anything to change it.
+      </p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {facts.map((fact) => (
+          <button key={fact} type="button" className="sb-chip" style={{ minHeight: 44 }} onClick={onRules}>
+            <span>{fact}</span>
+          </button>
+        ))}
+        <button type="button" className="sb-chip" style={{ minHeight: 44, borderRadius: 14, textAlign: "left" }} onClick={onRules}>
+          <span style={{ whiteSpace: "normal" }}>Sets: {s.rounds.map((r) => ROUNDS[r].name).join(", then ")}</span>
+        </button>
+      </div>
+      <div style={{ marginTop: 14, paddingBottom: 6 }}>
+        <Button className={nudge ? "sb-pulse" : undefined} onClick={onRules}>
+          <SlidersHorizontal size={22} /> Set list &amp; rules
+        </Button>
+      </div>
+    </Liner>
+  )
+}
+
 export function Lobby({ store, snap, state }: ScreenProps) {
   const [sheetPlayer, setSheetPlayer] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Until the host has opened the rules once, the button draws the eye.
+  const [rulesSeen, setRulesSeen] = useState(false)
+  const openRules = () => {
+    setRulesSeen(true)
+    setSettingsOpen(true)
+  }
   // null = follow the room (open while it is filling); true/false = the host chose.
   const [inviteChoice, setInviteChoice] = useState<boolean | null>(null)
   const [askStart, setAskStart] = useState(false)
@@ -156,7 +198,23 @@ export function Lobby({ store, snap, state }: ScreenProps) {
 
   return (
     <Page>
-      <TopBar store={store} snap={snap} state={state} />
+      <TopBar
+        store={store}
+        snap={snap}
+        state={state}
+        extra={
+          me.host ? (
+            <button type="button" className="sb-iconbtn" aria-label="Set list and rules" onClick={openRules}>
+              <Gear size={22} />
+            </button>
+          ) : undefined
+        }
+        hostShortcut={
+          me.host
+            ? { label: "Set list & rules", note: "Theme, starting letter, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
+            : undefined
+        }
+      />
 
       {/* ── headline ── */}
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -181,8 +239,11 @@ export function Lobby({ store, snap, state }: ScreenProps) {
             {per} {per === 1 ? "word" : "words"} each
           </span>
         </div>
-        {isHost && <HostTheme store={store} theme={theme} letter={s.letter} onRules={() => setSettingsOpen(true)} />}
+        {isHost && <HostTheme store={store} theme={theme} letter={s.letter} />}
       </Card>
+
+      {/* ── host: everything you can change ── */}
+      {isHost && <HostDesk settings={s} nudge={!rulesSeen} onRules={openRules} />}
 
       {/* ── host: get people in ── */}
       {isHost &&
@@ -341,7 +402,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
         </div>
         {isHost && (
           <div style={{ marginTop: 14 }}>
-            <Button size="sm" variant="cyan" onClick={() => setSettingsOpen(true)}>
+            <Button size="sm" variant="cyan" onClick={openRules}>
               <SlidersHorizontal size={18} /> Change the set list
             </Button>
           </div>

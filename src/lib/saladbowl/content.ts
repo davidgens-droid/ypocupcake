@@ -98,6 +98,9 @@ export const SKIP_RULES: Record<SkipRule, { name: string; detail: string }> = {
 
 export const TURN_LENGTHS = [30, 45, 60, 75, 90, 120]
 
+/** How many words each player writes in a new game (the host can change it, 1 to 10). */
+export const DEFAULT_WORDS_EACH = 8
+
 /** "1:05" / "0:07". */
 export function clock(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000))

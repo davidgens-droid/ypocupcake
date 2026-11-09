@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation"
 import { ArrowRight } from "lucide-react"
 
 import { errorText } from "@/lib/saladbowl/api"
+import { DEFAULT_WORDS_EACH } from "@/lib/saladbowl/content"
 import { lastName, recentGames, withProfile } from "@/lib/saladbowl/seats"
 import { createGame } from "@/lib/saladbowl/store"
 
@@ -154,7 +155,7 @@ export function Landing() {
     if (!clean) return fail(errorText("name"))
     setStarting(true)
     setProblem(null)
-    const res = await createGame(clean, { theme: theme.trim(), letter })
+    const res = await createGame(clean, { theme: theme.trim(), letter, wordsPerPlayer: DEFAULT_WORDS_EACH })
     if (!res.ok) {
       setStarting(false)
       return fail(errorText(res.error))
