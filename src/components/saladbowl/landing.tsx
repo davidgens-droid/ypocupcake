@@ -132,6 +132,7 @@ export function Landing() {
   // null = untouched, so the remembered name shows until they type.
   const [draft, setDraft] = useState<string | null>(null)
   const [code, setCode] = useState("")
+  const [theme, setTheme] = useState("")
   const [starting, setStarting] = useState(false)
   const [joining, setJoining] = useState(false)
   const [problem, setProblem] = useState<{ text: string; n: number } | null>(null)
@@ -149,7 +150,7 @@ export function Landing() {
     if (!clean) return fail(errorText("name"))
     setStarting(true)
     setProblem(null)
-    const res = await createGame(clean)
+    const res = await createGame(clean, { theme: theme.trim() })
     if (!res.ok) {
       setStarting(false)
       return fail(errorText(res.error))
@@ -294,6 +295,23 @@ export function Landing() {
                 spellCheck={false}
                 enterKeyHint="go"
               />
+            </div>
+            <div className="sb-field">
+              <label htmlFor="sb-start-theme">Tonight&apos;s theme (optional)</label>
+              <input
+                id="sb-start-theme"
+                className="sb-input"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+                maxLength={80}
+                placeholder="e.g. 90s movies"
+                autoComplete="off"
+                enterKeyHint="go"
+              />
+              <p style={{ margin: "2px 0 0", fontSize: "0.92rem" }}>
+                What everyone writes their words about. Leave it empty for anything goes. You can change it, and set the
+                rest of the rules, on the next screen.
+              </p>
             </div>
             {problem && (
               <p key={problem.n} className="sb-error sb-shake" role="alert" style={{ margin: 0 }}>

@@ -3,8 +3,8 @@
 // Salad Bowl — the lobby ("soundcheck"). Everyone writes their words; the
 // host invites people, sorts the teams, sets the set list and rules, then
 // starts the show.
-import { useState } from "react"
-import { Check, QrCode as QrIcon, Shuffle, SlidersHorizontal } from "lucide-react"
+import { useState, type FormEvent } from "react"
+import { Check, Pencil, QrCode as QrIcon, Shuffle, SlidersHorizontal } from "lucide-react"
 
 import { errorText } from "@/lib/saladbowl/api"
 import { ROUNDS, SKIP_RULES } from "@/lib/saladbowl/content"
@@ -17,6 +17,76 @@ import type { ScreenProps } from "./props"
 import { TopBar } from "./room-bar"
 import { SharePanel } from "./share"
 import { Button, Card, Display, Kicker, Label, Marker, Page, Stamp, TempoBadge, cx, toast } from "./ui"
+
+/**
+ * Host only: set or change tonight's theme right on the theme card (the
+ * first thing a host looks for), with the rest of the rules one tap away.
+ */
+function HostTheme({ store, theme, onRules }: { store: ScreenProps["store"]; theme: string; onRules: () => void }) {
+  // null = not editing; a string = the text being typed.
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    if (draft === null || saving) return
+    setSaving(true)
+    const res = await store.host("settings", { theme: draft.trim() })
+    setSaving(false)
+    if (!res.ok) return toast(errorText(res.error), true)
+    setDraft(null)
+  }
+
+  if (draft !== null) {
+    return (
+      <form onSubmit={save} noValidate style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="sb-field">
+          <label htmlFor="sb-lobby-theme">Tonight&apos;s theme</label>
+          <input
+            id="sb-lobby-theme"
+            className="sb-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={80}
+            placeholder="e.g. 90s movies"
+            autoFocus
+            autoComplete="off"
+            enterKeyHint="done"
+          />
+        </div>
+        <p style={{ margin: 0, fontSize: "0.92rem" }}>
+          Everyone sees it while they write their words. Leave it empty for anything goes.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Button type="submit" size="sm" disabled={saving}>
+            <Check size={18} strokeWidth={3} /> Save theme
+          </Button>
+          <Button size="sm" variant="paper" disabled={saving} onClick={() => setDraft(null)}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+      {!theme && (
+        <p style={{ margin: 0, fontSize: "0.95rem" }}>
+          No theme set yet, so anything goes. Pick one before people start writing.
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Button size="sm" variant={theme ? "paper" : "yellow"} onClick={() => setDraft(theme)}>
+          <Pencil size={18} /> {theme ? "Change theme" : "Set the theme"}
+        </Button>
+        <Button size="sm" variant="cyan" onClick={onRules}>
+          <SlidersHorizontal size={18} /> Set list &amp; rules
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 export function Lobby({ store, snap, state }: ScreenProps) {
   const [sheetPlayer, setSheetPlayer] = useState<string | null>(null)
@@ -106,13 +176,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
             {per} {per === 1 ? "word" : "words"} each
           </span>
         </div>
-        {isHost && (
-          <div style={{ marginTop: 16 }}>
-            <Button size="sm" variant="cyan" onClick={() => setSettingsOpen(true)}>
-              <SlidersHorizontal size={18} /> Set list &amp; rules
-            </Button>
-          </div>
-        )}
+        {isHost && <HostTheme store={store} theme={theme} onRules={() => setSettingsOpen(true)} />}
       </Card>
 
       {/* ── host: get people in ── */}
