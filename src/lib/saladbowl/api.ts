@@ -171,6 +171,8 @@ export function errorText(code: string): string {
       return "Lots of games started from here just now. Try again in a bit."
     case "not_installed":
       return "Salad Bowl isn't switched on yet. The database step still needs to be run."
+    case "helper_off":
+      return "The host has switched the idea machine off for this game. You've got this."
     case "ai_off":
       return "The idea machine is unplugged right now."
     case "network":

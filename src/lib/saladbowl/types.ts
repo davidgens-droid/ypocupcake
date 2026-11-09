@@ -26,6 +26,13 @@ export interface Settings {
    * no value here, so always test it with `=== true`.
    */
   noProperNouns?: boolean
+  /**
+   * Whether players may ask the AI idea helper for word ideas in this game.
+   * On by default. Games created before this switch existed have no value
+   * here and the helper is allowed in them, so always test it with
+   * `!== false`. (The host's own theme ideas are not affected.)
+   */
+  aiHelper?: boolean
   teams: { name: string }[] // 2–4; index = team number
   rounds: RoundType[] // always all three, in play order
 }

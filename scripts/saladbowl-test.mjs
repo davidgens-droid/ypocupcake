@@ -75,6 +75,9 @@ async function apply() {
   const sql = fs.readFileSync(path.join(ROOT, "supabase", "migrations", "0026_saladbowl.sql"), "utf8")
   await pg.query(sql)
   await pg.query(sql) // idempotency: a second run must also succeed
+  // Start from an empty table (TEST project only; the guard above refuses
+  // production): earlier runs otherwise trip the 30-games-an-hour brake.
+  await pg.query("delete from saladbowl_games")
   await pg.query("notify pgrst, 'reload schema'")
   console.log("· 0026_saladbowl.sql applied twice (idempotent)")
   // PostgREST needs a moment to see the new functions.
@@ -331,6 +334,15 @@ async function tests() {
   const np3 = await host(r3.code, r3.token, "settings", { noProperNouns: "yes please" })
   ok("a non-boolean value falls back to off", np3.ok && np3.state.settings.noProperNouns === false, np3.state?.settings)
   ok("a spectator can read the rule (it is shown on the join and TV screens)", (await state(r3.code)).state.settings.noProperNouns === false)
+
+  // ── the AI idea helper can be switched off per game ───────────────────────
+  ok("aiHelper defaults to on", np3.state.settings.aiHelper === true, np3.state?.settings)
+  const ah1 = await host(r3.code, r3.token, "settings", { aiHelper: false })
+  ok("host can switch aiHelper off", ah1.ok && ah1.state.settings.aiHelper === false && ah1.state.settings.theme === "Kitchen things", ah1.state?.settings)
+  const ah2 = await host(r3.code, r3.token, "settings", { turnSeconds: 45 })
+  ok("…and it stays off through an unrelated settings change", ah2.ok && ah2.state.settings.aiHelper === false && ah2.state.settings.turnSeconds === 45)
+  const ah3 = await host(r3.code, r3.token, "settings", { aiHelper: "nope" })
+  ok("a non-boolean value falls back to on", ah3.ok && ah3.state.settings.aiHelper === true, ah3.state?.settings)
 
   // ── got-it → undo → got-it is not a free skip ─────────────────────────────
   const gz = await setup(4, { skipRule: "none" }, 3)

@@ -47,6 +47,8 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
   const wordsExist = state.bowl.total > 0
   // Games made before this rule existed carry no value: only true is "on".
   const noProperNouns = s.noProperNouns === true
+  // The other way round for the idea machine: no value means "on", only false is "off".
+  const aiHelper = s.aiHelper !== false
 
   async function saveQuietly(patch: Partial<Settings>): Promise<boolean> {
     const res = await store.host("settings", patch)
@@ -319,6 +321,26 @@ function SettingsBody({ store, snap, state, onClose }: ScreenProps & { onClose: 
         {noProperNouns && wordsExist && (
           <p style={{ margin: 0, fontSize: "0.92rem" }}>Words already written stay. Ask anyone who used a name to swap it.</p>
         )}
+      </Section>
+
+      {/* ── idea machine ── */}
+      {/* Word ideas for players only: the theme ideas button above always works. */}
+      <Section
+        title="Idea machine"
+        note={
+          aiHelper
+            ? "Players who are stuck can tap Get ideas for word suggestions."
+            : "No AI help. Everyone comes up with their own words."
+        }
+      >
+        <div className="sb-seg" role="group" aria-label="Idea machine for players">
+          <button type="button" aria-pressed={aiHelper} disabled={working} onClick={() => void save({ aiHelper: true })}>
+            On
+          </button>
+          <button type="button" aria-pressed={!aiHelper} disabled={working} onClick={() => void save({ aiHelper: false })}>
+            Off
+          </button>
+        </div>
       </Section>
 
       {/* ── words per player ── */}

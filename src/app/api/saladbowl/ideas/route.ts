@@ -2,7 +2,7 @@
 //
 // POST { code, token, kind: "words" | "themes" }
 //   → always HTTP 200 with { ok: true, ideas: string[] } or { ok: false, error }
-//     error: "invalid" | "no_game" | "no_seat" | "not_host" | "ai_off"
+//     error: "invalid" | "no_game" | "no_seat" | "not_host" | "helper_off" | "ai_off"
 //
 // A stuck player gets word ideas for tonight's theme; the host gets theme ideas.
 // The caller must hold a real seat in a real game (checked through the same
@@ -12,6 +12,10 @@
 // When the host has switched on the "No proper nouns" house rule
 // (settings.noProperNouns === true) the helper obeys it: see the COMMON_*
 // constants and buildCommonWordsPrompt below.
+//
+// The host can also switch the helper off for players
+// (settings.aiHelper === false): word ideas are then refused with "helper_off"
+// before any model call. The host's own theme ideas are not affected.
 //
 // Salad Bowl is standalone: the only things shared with Cupcake are the domain,
 // the Anthropic key and the model constant below.
@@ -23,7 +27,7 @@ import { AI_MODEL } from "@/lib/ai/model"
 export const maxDuration = 30
 
 type Kind = "words" | "themes"
-type Fail = "invalid" | "no_game" | "no_seat" | "not_host" | "ai_off"
+type Fail = "invalid" | "no_game" | "no_seat" | "not_host" | "helper_off" | "ai_off"
 
 const CODE_RE = /^[A-Za-z]{4}$/
 const TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -200,6 +204,8 @@ interface GameFacts {
   host: boolean
   /** The "No proper nouns" house rule is on. Old games have no value: off. */
   noProperNouns: boolean
+  /** Players may ask for word ideas. Old games have no value: allowed. */
+  aiHelper: boolean
 }
 
 function fail(error: Fail): Response {
@@ -270,6 +276,7 @@ function readGame(data: unknown): GameFacts | Fail {
     own,
     host: state.me.host === true,
     noProperNouns: settings.noProperNouns === true,
+    aiHelper: settings.aiHelper !== false,
   }
 }
 
@@ -543,6 +550,9 @@ export async function POST(request: Request): Promise<Response> {
     const game = readGame(data)
     if (typeof game === "string") return fail(game)
     if (kind === "themes" && !game.host) return fail("not_host")
+    // The host has switched word ideas off for this game. Hiding the button is
+    // not enforcement, so the refusal lives here, before any model call.
+    if (kind === "words" && !game.aiHelper) return fail("helper_off")
 
     // 3. Ask the model.
     const apiKey = process.env.ANTHROPIC_API_KEY

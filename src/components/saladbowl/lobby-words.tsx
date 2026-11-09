@@ -8,7 +8,7 @@ import { Lightbulb, Plus, X } from "lucide-react"
 import { errorText, fetchIdeas } from "@/lib/saladbowl/api"
 
 import type { ScreenProps } from "./props"
-import { Button, Card, Label, Marker, Stamp } from "./ui"
+import { Button, Card, Label, Marker, Stamp, toast } from "./ui"
 
 export function LobbyWords({ store, snap, state }: ScreenProps) {
   const [text, setText] = useState("")
@@ -34,6 +34,9 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
   const letter = state.settings.letter
   // Games made before this rule existed carry no value: only true is "on".
   const noProperNouns = state.settings.noProperNouns === true
+  // The host's idea machine switch. Old games carry no value and it is allowed
+  // in them: only false is "off".
+  const aiHelper = state.settings.aiHelper !== false
   const count = me.words.length
   const full = count >= per
   const adding = snap.pending === "word:add"
@@ -41,7 +44,8 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
   const hostName = state.players.find((p) => p.host)?.name ?? "the host"
   const mine = new Set(me.words.map((w) => w.text.trim().toLowerCase()))
   const ideasFit = ideas.theme === state.settings.theme && ideas.letter === letter && ideas.noProperNouns === noProperNouns
-  const shownIdeas = ideasFit ? ideas.list.filter((idea) => !mine.has(idea.trim().toLowerCase())) : []
+  // No chips at all while the host has the idea machine switched off.
+  const shownIdeas = aiHelper && ideasFit ? ideas.list.filter((idea) => !mine.has(idea.trim().toLowerCase())) : []
 
   /** Restart the shake on the text field without remounting it (keeps focus). */
   function shakeField() {
@@ -94,6 +98,16 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
     const forNoProperNouns = noProperNouns
     const res = await fetchIdeas(state.code, token, "words")
     setIdeasBusy(false)
+    // The host switched the idea machine off while this was in the air: the
+    // button is already gone, and nothing from this request is shown or kept.
+    if (store.getSnapshot().state?.settings.aiHelper === false) return
+    if (!res.ok && res.error === "helper_off") {
+      // Switched off a moment ago and this screen had not caught up: say so,
+      // then fetch the game again so the button goes away.
+      toast(errorText(res.error))
+      void store.refresh()
+      return
+    }
     setAsked(true)
     if (!res.ok) {
       setIdeasError(errorText(res.error))
@@ -206,7 +220,15 @@ export function LobbyWords({ store, snap, state }: ScreenProps) {
         </Marker>
       </p>
 
-      {!full && (
+      {!full && !aiHelper && (
+        <p style={{ borderTop: "2px dashed rgba(12,12,14,.3)", margin: "14px 0 0", paddingTop: 14, fontSize: "0.95rem" }}>
+          {me.host
+            ? "No idea machine tonight. It is switched off in Set list & rules, so everyone brings their own words."
+            : `No idea machine tonight: ${hostName} wants your own words.`}
+        </p>
+      )}
+
+      {!full && aiHelper && (
         <div style={{ borderTop: "2px dashed rgba(12,12,14,.3)", marginTop: 14, paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <span className="sb-cond" style={{ fontSize: "1.1rem" }}>

@@ -102,6 +102,8 @@ function HostDesk({ settings, nudge, onRules }: { settings: Settings; nudge: boo
     `${s.teams.length} teams`,
     s.letter ? `Starts with ${s.letter}` : "Any starting letter",
     s.noProperNouns === true ? "No proper nouns" : "Proper nouns allowed",
+    // Games made before this switch existed carry no value: only false is "off".
+    s.aiHelper !== false ? "Idea machine on" : "Idea machine off",
     SKIP_RULES[s.skipRule].name,
     s.carryOver ? "Leftover time carries over" : "Leftover time is lost",
   ]
@@ -214,7 +216,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
         }
         hostShortcut={
           me.host
-            ? { label: "Set list & rules", note: "Theme, starting letter, proper nouns, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
+            ? { label: "Set list & rules", note: "Theme, starting letter, proper nouns, the idea machine, words each, turn length, teams, the order of the sets and skipping.", onClick: openRules }
             : undefined
         }
       />

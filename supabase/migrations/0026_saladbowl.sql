@@ -181,6 +181,7 @@ declare
   v_skip text;
   v_carry boolean := true;
   v_no_proper boolean := false;
+  v_ai_helper boolean := true;
   v_teams jsonb := '[]'::jsonb;
   v_rounds jsonb := '[]'::jsonb;
   v_defaults text[] := array['Lettuce Zeppelin', 'The Beet-les', 'Radishhead', 'Kale Halen'];
@@ -205,6 +206,10 @@ begin
   -- House rule shown to everyone while they write (and obeyed by the idea
   -- helper): no names of people, places, brands or titles. Not machine-checked.
   if jsonb_typeof(v->'noProperNouns') = 'boolean' then v_no_proper := (v->>'noProperNouns')::boolean; end if;
+  -- Whether players may ask the AI idea helper for word ideas in this game
+  -- (on by default). The /api/saladbowl/ideas route reads it and refuses
+  -- word ideas when it is off.
+  if jsonb_typeof(v->'aiHelper') = 'boolean' then v_ai_helper := (v->>'aiHelper')::boolean; end if;
 
   if jsonb_typeof(v->'teams') = 'array' then
     v_n := least(greatest(jsonb_array_length(v->'teams'), 2), 4);
@@ -240,6 +245,7 @@ begin
     'skipRule', v_skip,
     'carryOver', v_carry,
     'noProperNouns', v_no_proper,
+    'aiHelper', v_ai_helper,
     'teams', v_teams,
     'rounds', v_rounds
   );
