@@ -4,7 +4,7 @@
 // host invites people, sorts the teams, sets the set list and rules, then
 // starts the show.
 import { useState, type FormEvent } from "react"
-import { Check, Pencil, QrCode as QrIcon, Shuffle, SlidersHorizontal } from "lucide-react"
+import { CaseSensitive, Check, Pencil, QrCode as QrIcon, Shuffle, SlidersHorizontal } from "lucide-react"
 
 import { errorText } from "@/lib/saladbowl/api"
 import { ROUNDS, SKIP_RULES } from "@/lib/saladbowl/content"
@@ -22,7 +22,7 @@ import { Button, Card, Display, Kicker, Label, Marker, Page, Stamp, TempoBadge, 
  * Host only: set or change tonight's theme right on the theme card (the
  * first thing a host looks for), with the rest of the rules one tap away.
  */
-function HostTheme({ store, theme, onRules }: { store: ScreenProps["store"]; theme: string; onRules: () => void }) {
+function HostTheme({ store, theme, letter, onRules }: { store: ScreenProps["store"]; theme: string; letter: string; onRules: () => void }) {
   // null = not editing; a string = the text being typed.
   const [draft, setDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -73,12 +73,17 @@ function HostTheme({ store, theme, onRules }: { store: ScreenProps["store"]; the
     <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
       {!theme && (
         <p style={{ margin: 0, fontSize: "0.95rem" }}>
-          No theme set yet, so anything goes. Pick one before people start writing.
+          {letter
+            ? `No theme set yet: any word that starts with ${letter}. Add a theme before people start writing if you want one.`
+            : "No theme set yet, so anything goes. Pick one before people start writing."}
         </p>
       )}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <Button size="sm" variant={theme ? "paper" : "yellow"} onClick={() => setDraft(theme)}>
           <Pencil size={18} /> {theme ? "Change theme" : "Set the theme"}
+        </Button>
+        <Button size="sm" variant="paper" onClick={onRules}>
+          <CaseSensitive size={20} /> {letter ? `Starts with ${letter}` : "Starts with: any letter"}
         </Button>
         <Button size="sm" variant="cyan" onClick={onRules}>
           <SlidersHorizontal size={18} /> Set list &amp; rules
@@ -168,7 +173,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
       <Card tape tilt="l" bar="yellow">
         <Kicker tone="ink">Tonight&apos;s theme</Kicker>
         <Display as="h2" variant="pop" size={themeSize} style={{ margin: "8px 0 14px" }}>
-          {theme || "Anything goes"}
+          {theme || (s.letter ? `Anything starting with ${s.letter}` : "Anything goes")}
         </Display>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           {s.letter && <Stamp>Starts with {s.letter}</Stamp>}
@@ -176,7 +181,7 @@ export function Lobby({ store, snap, state }: ScreenProps) {
             {per} {per === 1 ? "word" : "words"} each
           </span>
         </div>
-        {isHost && <HostTheme store={store} theme={theme} onRules={() => setSettingsOpen(true)} />}
+        {isHost && <HostTheme store={store} theme={theme} letter={s.letter} onRules={() => setSettingsOpen(true)} />}
       </Card>
 
       {/* ── host: get people in ── */}

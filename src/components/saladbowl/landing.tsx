@@ -122,6 +122,8 @@ const clip: CSSProperties = {
 const lineupLabel: CSSProperties = { opacity: 0.62, marginBottom: 3 }
 const lineupBody: CSSProperties = { fontSize: "0.92rem", lineHeight: 1.25, marginTop: 2 }
 
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+
 // ─── the page ────────────────────────────────────────────────────────────────
 
 export function Landing() {
@@ -133,6 +135,8 @@ export function Landing() {
   const [draft, setDraft] = useState<string | null>(null)
   const [code, setCode] = useState("")
   const [theme, setTheme] = useState("")
+  // "" = any letter; otherwise every word must start with this letter.
+  const [letter, setLetter] = useState("")
   const [starting, setStarting] = useState(false)
   const [joining, setJoining] = useState(false)
   const [problem, setProblem] = useState<{ text: string; n: number } | null>(null)
@@ -150,7 +154,7 @@ export function Landing() {
     if (!clean) return fail(errorText("name"))
     setStarting(true)
     setProblem(null)
-    const res = await createGame(clean, { theme: theme.trim() })
+    const res = await createGame(clean, { theme: theme.trim(), letter })
     if (!res.ok) {
       setStarting(false)
       return fail(errorText(res.error))
@@ -309,8 +313,40 @@ export function Landing() {
                 enterKeyHint="go"
               />
               <p style={{ margin: "2px 0 0", fontSize: "0.92rem" }}>
-                What everyone writes their words about. Leave it empty for anything goes. You can change it, and set the
-                rest of the rules, on the next screen.
+                What everyone writes their words about. Leave it empty for anything goes.
+              </p>
+            </div>
+            <div className="sb-field">
+              <span className="sb-fieldlabel" id="sb-start-letter">
+                Words must start with (optional)
+              </span>
+              <div
+                className="sb-seg"
+                role="group"
+                aria-labelledby="sb-start-letter"
+                style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}
+              >
+                <button type="button" style={{ gridColumn: "1 / -1", minWidth: 0 }} aria-pressed={letter === ""} onClick={() => setLetter("")}>
+                  Any letter
+                </button>
+                {LETTERS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    style={{ minWidth: 0, padding: 0 }}
+                    aria-pressed={letter === l}
+                    aria-label={`Every word starts with ${l}`}
+                    onClick={() => setLetter(letter === l ? "" : l)}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <p style={{ margin: "2px 0 0", fontSize: "0.92rem" }}>
+                {letter
+                  ? `Every word has to start with ${letter}. The game turns away any word that doesn't.`
+                  : "Tap a letter and every word has to start with it. The game turns away any word that doesn't."}{" "}
+                You can change all of this, and set the rest of the rules, on the next screen.
               </p>
             </div>
             {problem && (
