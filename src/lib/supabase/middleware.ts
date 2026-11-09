@@ -4,6 +4,17 @@ import { NextResponse, type NextRequest } from "next/server"
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request })
 
+  // Salad Bowl (/saladbowl) is a separate, account-free party game that only
+  // shares the domain: no sign-in, and no forum session is read or refreshed.
+  const path = request.nextUrl.pathname
+  if (
+    path === "/saladbowl" ||
+    path.startsWith("/saladbowl/") ||
+    path.startsWith("/api/saladbowl/")
+  ) {
+    return response
+  }
+
   // Pre-Supabase dev mode: skip auth so the UI renders without credentials.
   if (
     !process.env.NEXT_PUBLIC_SUPABASE_URL ||

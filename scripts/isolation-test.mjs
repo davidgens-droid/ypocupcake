@@ -670,9 +670,12 @@ async function assertions(F) {
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.prosecdef
   `)
-  // peek_invite is the ONE deliberate exception (a link holder may learn the
-  // forum's name before signing in); anything else here is a regression.
-  const anonExec = defs.filter((d) => d.anon_exec).map((d) => d.proname).filter((n) => n !== "peek_invite")
+  // peek_invite is the ONE deliberate Cupcake exception (a link holder may
+  // learn the forum's name before signing in); anything else is a regression.
+  // The saladbowl_* functions belong to the separate, account-free party game
+  // at /saladbowl (migration 0026): anonymous by design, they only ever touch
+  // saladbowl_* tables, and scripts/saladbowl-test.mjs covers them.
+  const anonExec = defs.filter((d) => d.anon_exec).map((d) => d.proname).filter((n) => n !== "peek_invite" && !n.startsWith("saladbowl_"))
   ok("12.12 no SECURITY DEFINER function other than peek_invite is executable by anon", anonExec.length === 0, anonExec.join(", "))
 }
 

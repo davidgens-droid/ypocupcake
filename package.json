@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:isolation": "node scripts/isolation-test.mjs",
-    "test:crypto": "node scripts/crypto-test.mjs"
+    "test:crypto": "node scripts/crypto-test.mjs",
+    "test:saladbowl": "node --use-system-ca scripts/saladbowl-test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
@@ -25,6 +26,7 @@
     "lucide-react": "^1.11.0",
     "next": "16.2.4",
     "next-themes": "^0.4.6",
+    "qrcode-generator": "^1.4.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-hook-form": "^7.74.0",
